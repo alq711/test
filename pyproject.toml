@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hwpxwriter"
+version = "0.1.0"
+description = "Markdown/텍스트를 한글(HWPX) 문서로 변환하는 라이브러리와 명령줄 도구"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+md2hwpx = "hwpxwriter.cli:main"
+
+[tool.setuptools]
+packages = ["hwpxwriter"]
