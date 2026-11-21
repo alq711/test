@@ -159,7 +159,17 @@ $$v(t) = x'(t)$$              ← 회색 배경 수식 줄
 :::
 ````
 
-표 안의 강조 색은 `<span style="color:#1F3864">**높음**</span>`처럼 씁니다.
+원고 안 일부 글자의 글꼴·크기·색은 `<span>`으로 바꿉니다 (Obsidian 미리보기에서도 같게 보입니다).
+
+```markdown
+<span style="color:#1F3864">**높음**</span>
+<span style="font-family:'나눔스퀘어'; font-size:12pt">이 글자만 다른 글꼴</span>
+<span style="font-family:맑은 고딕; font-weight:bold; background-color:#FFF2CC">굵게 + 배경</span>
+<font face="KoPub바탕체" size="11pt" color="#C00000">font 태그도 됨</font>
+```
+
+지원: `font-family`(첫 번째 글꼴, `serif` 같은 일반 이름은 무시), `font-size`(pt, px), `color`, `background-color`,
+`font-weight:bold`(또는 600 이상), `font-style:italic`, `text-decoration:underline / line-through`. 겹쳐 써도 됩니다.
 
 차례(목차)는 자동으로 만들지 않습니다. 쪽 번호는 한글이 배치한 뒤에야 정해지기 때문입니다. 한글의 **도구 → 차례/색인 → 차례 만들기**에서 "스타일로 모으기"로 `제목 1`, `제목 2`를 고르면 쪽 번호가 붙은 차례가 만들어집니다.
 

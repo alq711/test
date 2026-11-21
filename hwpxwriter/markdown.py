@@ -5,7 +5,8 @@ r"""Markdown → HwpxDocument 변환 (외부 라이브러리 없음).
          > 인용, ``` 코드 블록, | 표 |, ![그림](경로){width=50%}, ---(구분선),
          \\newpage · \\pagebreak · <!-- pagebreak -->(쪽 나눔), 줄 끝 공백 2칸/\\ (줄바꿈)
   글자:  **굵게**, *기울임*, ***굵게+기울임***, ~~취소선~~, `코드`, [링크](주소),
-         <u>밑줄</u>, <sup>위첨자</sup>, <sub>아래첨자</sub>, ==형광펜==, <br>
+         <u>밑줄</u>, <sup>위첨자</sup>, <sub>아래첨자</sub>, ==형광펜==, <br>,
+         <span style="font-family:나눔고딕; font-size:12pt; color:#C00000">글자</span>
   수식:  $x^2$ (글 안), $$\int_0^1 f(x)dx$$ 또는 \[ ... \] (가운데 한 줄)
   교재:  ::: 종류 제목 ... :::  (상자·문제 등 — handler 가 처리, 없으면 상자로)
          ① ... ② ... (객관식 보기), \columns{2} (다단), \columnbreak, \vspace{20mm}
@@ -141,15 +142,11 @@ def parse_inline(text: str, base: Run | None = None, link_color: str = "#0563C1"
             m = re.match(r"<(span|font)\b([^>]*)>", text[i:], re.I)
             if m:
                 tag = m.group(1).lower()
-                close = re.search(rf"</{tag}\s*>", text[i + m.end() :], re.I)
-                color = re.search(r"color\s*[:=]\s*[\"']?\s*(#[0-9a-fA-F]{3,6})", m.group(2))
-                if close:
-                    inner = text[i + m.end() : i + m.end() + close.start()]
-                    if color:
-                        wrap(inner, color=color.group(1))
-                    else:
-                        wrap(inner)
-                    i += m.end() + close.end()
+                end = _matching_close(text, i + m.end(), tag)
+                if end is not None:
+                    inner_end, after = end
+                    wrap(text[i + m.end() : inner_end], **_span_style(m.group(2)))
+                    i = after
                     continue
             m = re.match(r"<(\w+)(?:\s[^>]*)?>", text[i:])
             if m and m.group(1).lower() in _HTML_TAGS:
@@ -201,6 +198,62 @@ def parse_inline(text: str, base: Run | None = None, link_color: str = "#0563C1"
         i += 1
 
     emit_text()
+    return out
+
+
+_GENERIC_FONTS = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "inherit", "initial"}
+
+
+def _matching_close(text: str, start: int, tag: str) -> tuple[int, int] | None:
+    """start 이후에서 짝이 맞는 </tag> 의 (시작, 끝). 같은 태그가 안에 겹쳐 있어도 된다."""
+    depth = 1
+    for m in re.finditer(rf"<(/?){tag}\b[^>]*>", text[start:], re.I):
+        depth += -1 if m.group(1) else 1
+        if depth == 0:
+            return start + m.start(), start + m.end()
+    return None
+
+
+def _span_style(attrs: str) -> dict:
+    """<span style="color:#C00; font-family:'나눔고딕'; font-size:12pt; font-weight:bold"> /
+    <font color="#C00" face="나눔고딕" size="12"> → Run 속성."""
+    props: dict[str, str] = {}
+    sm = re.search(r"style\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", attrs, re.I)
+    if sm:
+        for decl in (sm.group(1) or sm.group(2) or "").split(";"):
+            if ":" in decl:
+                k, v = decl.split(":", 1)
+                props[k.strip().lower()] = v.strip()
+    for name, key in (("color", "color"), ("face", "font-family"), ("size", "font-size")):
+        am = re.search(rf"\b{name}\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", attrs, re.I)
+        if am and key not in props:
+            props[key] = next(g for g in am.groups() if g is not None)
+    out: dict = {}
+    color = props.get("color", "")
+    if re.fullmatch(r"#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}", color):
+        out["color"] = color
+    bg = props.get("background-color") or props.get("background", "")
+    if re.fullmatch(r"#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}", bg):
+        out["highlight"] = bg
+    for family in (props.get("font-family") or "").split(","):
+        family = family.strip().strip("\"'").strip()
+        if family and family.lower() not in _GENERIC_FONTS:
+            out["font"] = family
+            break
+    size = re.fullmatch(r"\s*([\d.]+)\s*(pt|px)?\s*", props.get("font-size", ""))
+    if size:
+        value = float(size.group(1)) * (0.75 if size.group(2) == "px" else 1)
+        if 1 <= value <= 200:
+            out["size"] = value
+    weight = props.get("font-weight", "").lower()
+    if weight == "bold" or (weight.isdigit() and int(weight) >= 600):
+        out["bold"] = True
+    if props.get("font-style", "").lower() == "italic":
+        out["italic"] = True
+    if "underline" in props.get("text-decoration", "").lower():
+        out["underline"] = True
+    if "line-through" in props.get("text-decoration", "").lower():
+        out["strike"] = True
     return out
 
 

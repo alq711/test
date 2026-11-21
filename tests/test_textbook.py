@@ -358,3 +358,21 @@ def test_ruled_and_shaded_paragraphs_do_not_bleed():
     own = lambda p: "".join(t.text or "" for r in p.findall(HP + "run") for t in r.findall(HP + "t"))  # noqa: E731
     idx = next(i for i, p in enumerate(paras) if own(p).endswith("수직선 위의 운동"))
     assert "".join(t.text or "" for t in paras[idx + 1].iter(HP + "t")) == ""
+
+
+def test_span_font_family_size_and_style():
+    r = parse_inline("<span style=\"font-family: '나눔스퀘어', sans-serif; font-size: 12pt; color:#C00000; "
+                     "font-weight:700\">글자</span>")[0]
+    assert (r.text, r.font, r.size, r.color, r.bold) == ("글자", "나눔스퀘어", 12.0, "#C00000", True)
+    r = parse_inline('<font face="맑은 고딕" size="16px">작게</font>')[0]
+    assert (r.font, r.size) == ("맑은 고딕", 12.0)
+    runs = parse_inline('<span style="font-family:바탕">겉 <span style="color:#00F">속</span> 끝</span>')
+    assert [(x.text, x.font, x.color) for x in runs if x.text.strip()] == [
+        ("겉 ", "바탕", None), ("속", "바탕", "#00F"), (" 끝", "바탕", None)]
+    r = parse_inline('<span style="font-family: serif">기본</span>')[0]
+    assert r.font is None  # 일반 계열 이름은 무시
+    doc = HwpxDocument()
+    doc.add_markdown('본문 <span style="font-family:나눔스퀘어">강조</span>')
+    head = validate(doc.to_bytes())["Contents/header.xml"]
+    from test_hwpx import HH
+    assert "나눔스퀘어" in {f.get("face") for f in head.iter(HH + "font")}
