@@ -439,7 +439,10 @@ class _Parser:
             text = self.raw_group().replace('"', "''")
             if not text.strip():
                 return Atom("~", Box(0.33))
-            return Atom(f'"{text}"', Box(sum(_letter_w(c, True) for c in text)), "ord")
+            # 한글 수식은 따옴표 안 공백도 무시하므로 낱말 사이는 ~ (공백)
+            words = text.split(" ")
+            script = "~".join(f'"{w}"' if w else "" for w in words)
+            return Atom(script, Box(sum(_letter_w(c, True) for c in text)), "ord")
         if name in _FONT_CMDS:
             style = _FONT_CMDS[name]
             arg = self.argument()

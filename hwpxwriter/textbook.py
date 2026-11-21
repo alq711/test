@@ -504,7 +504,8 @@ class Textbook(MarkdownHandler):
         if p.columns > 1 and doc.at_top_level and doc._columns[0] != p.columns:
             doc.set_columns(p.columns, gap=self.t.column_gap, line=p.column_line)
         with doc.style_scope(font=p.font, size=p.size, line_spacing=p.line_spacing), \
-                doc.display_scope(align=p.display_align, background=None, indent=p.display_indent):
+                doc.display_scope(align=p.display_align, background=None, indent=p.display_indent), \
+                doc.keep_together():  # 문제 하나는 단·쪽 경계에서 나뉘지 않게
             if p.layout == "header":
                 source = [Run(r.text, size=p.source_size, color=p.source_color, equation=r.equation)
                           for r in inline(title)] if title else [Run("")]
@@ -614,9 +615,10 @@ class Textbook(MarkdownHandler):
             if e.source:
                 left += [Run("  "), Run(e.source, size=p.source_size, color="#333333")]
             right = [Run(a.answer_label + " ", bold=True)] + [replace(r, bold=True) for r in answer]
-            doc.add_split_line(left, right, rule=a.rule_color, ratio=(3, 1), space_after=4)
-            if e.solution:
-                self._render(doc, e.solution)
+            with doc.keep_together():
+                doc.add_split_line(left, right, rule=a.rule_color, ratio=(3, 1), space_after=4)
+                if e.solution:
+                    self._render(doc, e.solution)
             doc.add_spacer(1.5)
             return
         hang = units.mm(p.indent)

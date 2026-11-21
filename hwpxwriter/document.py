@@ -174,6 +174,7 @@ class HeadingStyle:
     rule_color: str | None = None  # 아래 선 색 (None = 선 없음)
     rule_width: str = "0.12 mm"
     rule_gap: float = 5.0  # 글자와 아래 선 사이 (pt)
+    line_spacing: int | None = None  # 줄 간격 % (큰 번호가 있으면 100~110 권장)
     space_before: float | None = None  # pt
     space_after: float | None = None  # pt
 
@@ -323,6 +324,7 @@ class HwpxDocument:
         self._width_stack: list[int] = []
         self._left = 0  # 현재 문맥의 추가 왼쪽 여백 (HWPUNIT)
         self._prefix: _Prefix | None = None
+        self._keep_together = False
         self._bins: list[_BinItem] = []
         self._bin_by_hash: dict[str, str] = {}
         self._header: HeaderSpec | None = None
@@ -418,10 +420,12 @@ class HwpxDocument:
             space_after=units.pt(after),
             keep_with_next=True,
         )
+        if hs.line_spacing:
+            para = replace(para, line_spacing=int(hs.line_spacing))
         if hs.rule_color:
+            # 아래 선은 '문단 아래 간격' 끝에 그어지므로 간격 = 글자와 선 사이. 선 뒤 간격은 add_heading 이 따로 띄움
             bf = self.styles.border(BorderFill(bottom=Line("SOLID", hs.rule_width, normalize_color(hs.rule_color))))
-            para = replace(para, border_fill=bf, border_offset_bottom=units.pt(hs.rule_gap),
-                           space_after=para.space_after + units.pt(hs.rule_gap))
+            para = replace(para, border_fill=bf, space_after=units.pt(hs.rule_gap))
         return char, para
 
     def _register_named_styles(self) -> dict[str, int]:
@@ -453,7 +457,7 @@ class HwpxDocument:
     def _code_char(self) -> CharStyle:
         return replace(self._body_char, font=self.theme.code_font, size=max(self.theme.font_size - 1, 6))
 
-    def _code_para(self, last: bool) -> ParaStyle:
+    def _code_para(self, last: bool, first: bool = False) -> ParaStyle:
         bf = self.styles.border(BorderFill(fill=normalize_color(self.theme.code_background)))
         pad = units.pt(6)
         return ParaStyle(
@@ -462,12 +466,9 @@ class HwpxDocument:
             left=pad,
             right=pad,
             border_fill=bf,
-            border_offset_left=pad,
-            border_offset_right=pad,
-            border_offset_top=units.pt(4),
-            border_offset_bottom=units.pt(4),
             border_connect=True,
-            space_after=units.pt(self.theme.paragraph_spacing + 6) if last else 0,
+            space_before=units.pt(5) if first else 0,
+            space_after=units.pt(5) if last else 0,
             break_latin_word="BREAK_WORD",
         )
 
@@ -618,6 +619,8 @@ class HwpxDocument:
         if self._left:
             para_pr = replace(para_pr, left=para_pr.left + self._left)
         top = self.at_top_level
+        if self._keep_together and top:
+            para_pr = replace(para_pr, keep_with_next=True)
         para = _Paragraph(
             self.styles.para(para_pr),
             style,
@@ -794,6 +797,10 @@ class HwpxDocument:
             sx, sp = self._runs_xml([Run("  ")] + _as_runs(sub), sub_char)
             xml, plain = xml + sx, plain + sp
         self._append(para, self._style_ids[f"h{level}"], xml, plain)
+        if hs.rule_color:
+            size = hs.size or self.theme.heading_sizes[min(level, len(self.theme.heading_sizes)) - 1]
+            after = hs.space_after if hs.space_after is not None else size * 0.4
+            self._gap(units.pt(after), keep_with_next=True)
 
     def add_title(self, content: Content, *, size: float | None = None, subtitle: Content | None = None) -> None:
         """문서 맨 위의 큰 가운데 정렬 제목."""
@@ -867,13 +874,14 @@ class HwpxDocument:
         indent = t.display_indent if indent is None else indent
         para = replace(self._body_para, align=align, left=units.mm(indent))
         if background:
+            # 배경은 위/아래 간격까지 칠해지므로 간격 = 안쪽 여백, 바깥 흰 틈은 뒤 빈 문단으로
             bf = self.styles.border(BorderFill(fill=normalize_color(background)))
-            gap = units.pt(5)
-            para = replace(para, border_fill=bf, border_offset_top=gap, border_offset_bottom=gap,
-                           space_before=para.space_before + gap, space_after=para.space_after + gap + units.pt(2),
-                           line_spacing=120)
+            pad = units.pt(6)
+            para = replace(para, border_fill=bf, space_before=pad, space_after=pad, line_spacing=120)
         xml, plain = self._runs_xml([Run(latex, equation=True, size=size)], self._body_char)
         self._append(para, self._style_ids["body"], xml, plain)
+        if background:
+            self._gap(units.pt(max(self.theme.paragraph_spacing, 3)))
 
     @contextmanager
     def display_scope(self, *, align: str | None = None, background: str | None = "",
@@ -950,9 +958,10 @@ class HwpxDocument:
         lines = code.replace("\r\n", "\n").rstrip("\n").split("\n") or [""]
         char = self._code_char()
         for i, line in enumerate(lines):
-            para = self._code_para(last=(i == len(lines) - 1))
+            para = self._code_para(last=(i == len(lines) - 1), first=(i == 0))
             xml, plain = self._runs_xml(line, char)
             self._append(para, self._style_ids["code"], xml, plain)
+        self._gap(units.pt(self.theme.paragraph_spacing + 4))
 
     def add_quote(self, content: Content, *, level: int = 0) -> None:
         """인용문 (왼쪽 세로줄)."""
@@ -962,10 +971,10 @@ class HwpxDocument:
     def add_horizontal_rule(self, *, color: str = "#999999", width: str = "0.25 mm", space_after: float = 8) -> None:
         """가로 구분선."""
         bf = self.styles.border(BorderFill(bottom=Line("SOLID", width, normalize_color(color) or "#999999")))
-        para = replace(self._body_para, border_fill=bf, line_spacing=100, space_after=units.pt(space_after),
-                       space_before=0)
-        xml, plain = self._runs_xml("", replace(self._body_char, size=4))
+        para = replace(self._body_para, border_fill=bf, line_spacing=100, space_after=0, space_before=0)
+        xml, plain = self._runs_xml("", self._tiny_char())
         self._append(para, 0, xml, plain, kind="object")
+        self._gap(units.pt(space_after))
 
     def add_split_line(
         self,
@@ -1015,9 +1024,24 @@ class HwpxDocument:
 
     def add_spacer(self, height_mm: float) -> None:
         """빈 공간 (풀이 공간 등)."""
-        para = replace(self._body_para, line_spacing=100, space_after=units.mm(height_mm))
+        self._gap(units.mm(height_mm))
+
+    def _gap(self, height: int, *, keep_with_next: bool = False) -> None:
+        """높이 height(HWPUNIT)의 보이지 않는 빈 문단."""
+        para = ParaStyle(align="LEFT", line_spacing=100, space_after=max(height - units.pt(2), 0),
+                         keep_with_next=keep_with_next)
         xml, plain = self._runs_xml("", self._tiny_char())
         self._append(para, 0, xml, plain, kind="object")
+
+    @contextmanager
+    def keep_together(self) -> Iterator[None]:
+        """안쪽 문단을 모두 '다음 문단과 함께' 로 묶어 쪽·단 경계에서 나뉘지 않게 한다 (문제 하나 등)."""
+        saved = self._keep_together
+        self._keep_together = True
+        try:
+            yield
+        finally:
+            self._keep_together = saved
 
     def add_page_break(self) -> None:
         """다음 문단을 새 쪽에서 시작한다."""

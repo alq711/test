@@ -44,6 +44,7 @@ EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "수학교재_�
         (r"\overline{AB}", "overline {A B}"),
         (r"\vec{a}", "vec {a}"),
         (r"\text{넓이}", '"넓이"'),
+        (r"\text{위치의 변화량} = 1", '"위치의"~"변화량" = 1'),
         (r"\mathrm{cm}^2", "{rm cm} ^{2}"),
         (r"\begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}", "pmatrix{1 & 2 # 3 & 4}"),
         (r"\begin{cases} x & x>0 \\ 0 & x \le 0 \end{cases}", "cases{x & x > 0 # 0 & x leq 0}"),
@@ -327,3 +328,33 @@ def test_cli_init_from_builtin(tmp_path: Path):
     assert cli_main(["--init-template", str(out), "-t", "수능파이널"]) == 0
     assert 'layout = "header"' in out.read_text(encoding="utf-8")
     assert not load_template(out).warnings
+
+
+def test_ruled_and_shaded_paragraphs_do_not_bleed():
+    """한글은 문단 테두리·배경을 위/아래 간격까지 포함해 그린다.
+
+    그래서 선·배경이 있는 문단은 테두리 오프셋(바깥으로 넘치는 부분)이 없어야 하고,
+    바깥 간격은 뒤따르는 빈 문단이 맡아야 한다.
+    """
+    from test_hwpx import HH
+
+    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), template="수능파이널", base_dir=SUNEUNG.parent)
+    trees = validate(doc.to_bytes())
+    head, sec = trees["Contents/header.xml"], trees["Contents/section0.xml"]
+    plain_bf = {bf.get("id") for bf in head.iter(HH + "borderFill")
+                if all(bf.find(HH + side).get("type") == "NONE"
+                       for side in ("leftBorder", "rightBorder", "topBorder", "bottomBorder"))
+                and bf.find(f".//{{http://www.hancom.co.kr/hwpml/2011/core}}winBrush") is None}
+    plain_bf |= {"1", "2"}
+    for pp in head.iter(HH + "paraPr"):
+        border = pp.find(HH + "border")
+        if border.get("borderFillIDRef") in plain_bf:
+            continue
+        if border.get("offsetLeft") != "0":  # 인용문 왼쪽 막대만 옆으로 띄움
+            continue
+        assert border.get("offsetTop") == "0" and border.get("offsetBottom") == "0", pp.get("id")
+    # 제목 '09' 문단 다음에는 선 아래 간격용 빈 문단
+    paras = sec.findall(HP + "p")
+    own = lambda p: "".join(t.text or "" for r in p.findall(HP + "run") for t in r.findall(HP + "t"))  # noqa: E731
+    idx = next(i for i, p in enumerate(paras) if own(p).endswith("수직선 위의 운동"))
+    assert "".join(t.text or "" for t in paras[idx + 1].iter(HP + "t")) == ""

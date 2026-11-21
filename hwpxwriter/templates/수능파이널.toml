@@ -43,9 +43,10 @@ number_color = "#1F3864"
 number_size = 34
 rule_color = "#1F3864"
 rule_width = "0.7 mm"
-rule_gap = 6
+rule_gap = 4                  # 글자와 선 사이 (pt)
+line_spacing = 100            # 큰 번호 때문에 줄이 높아지지 않게
 space_before = 0
-space_after = 16
+space_after = 16              # 선 아래 간격 (pt)
 
 [heading.2]                   # ## 핵심 개념   /   ## 최근 기출 | 공통 9번
 size = 11.5
@@ -53,7 +54,8 @@ color = "#1F3864"
 sub_color = "#333333"
 rule_color = "#BFBFBF"
 rule_width = "0.12 mm"
-rule_gap = 7
+rule_gap = 5
+line_spacing = 130
 space_before = 12
 space_after = 10
 
