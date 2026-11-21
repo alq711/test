@@ -123,8 +123,10 @@ class CoverStyle:
     rule_color: str = "#000000"
     desc_color: str = "#595959"
     desc_size: float = 9.0
-    author_space: float = 110.0  # mm: 설명과 저자 사이
+    author_space: float = 110.0  # mm: 설명과 저자 사이 (author_y 가 없을 때)
     author_size: float = 10.0
+    author_y: float | None = None  # mm: 종이 위에서 저자 줄까지 (정하면 본문 흐름과 상관없이 그 자리에)
+    author_color: str = "#222222"
 
 
 @dataclass
@@ -242,10 +244,14 @@ def template_from_dict(data: dict) -> Template:
         page.update(margin_top=top, margin_right=right, margin_bottom=bottom, margin_left=left)
     t.page = _apply(t.page, page, "page", w, convert={"paper": lambda v: tuple(v) if isinstance(v, list) else v})
 
+    font = dict(data.pop("font", {}))
+    for key in ("ratio", "spacing"):  # 장평·자간: 숫자 하나면 본문 글꼴, 표면 글꼴별
+        if key in font and not isinstance(font[key], dict):
+            font[key] = {font.get("body", Theme.body_font): font[key]}
     theme = _apply(
-        Theme(), dict(data.pop("font", {})), "font", w,
+        Theme(), font, "font", w,
         rename={"body": "body_font", "heading": "heading_font", "code": "code_font", "size": "font_size",
-                "color": "text_color"},
+                "color": "text_color", "ratio": "font_ratio", "spacing": "font_spacing"},
     )
     heading = dict(data.pop("heading", {}))
     levels = {k: heading.pop(k) for k in list(heading) if isinstance(heading[k], dict)}
@@ -490,7 +496,13 @@ class Textbook(MarkdownHandler):
             for text in info["desc"]:
                 doc.add_paragraph(self._inline(doc, text), size=c.desc_size, color=c.desc_color, font=head,
                                   align="left", line_spacing=140, space_after=0)
-        if info["author"]:
+        if info["author"] and c.author_y is not None:
+            # 종이 기준 고정 위치: 설명이 길어도 저자가 다음 쪽으로 밀려나지 않는다
+            x = doc.page.margin_left
+            for i, text in enumerate(info["author"]):
+                doc.add_paper_text(self._inline(doc, text), x=x, y=c.author_y + i * c.author_size * 0.6,
+                                   size=c.author_size, color=c.author_color, font=head)
+        elif info["author"]:
             doc.add_spacer(c.author_space)
             for text in info["author"]:
                 doc.add_paragraph(self._inline(doc, text), size=c.author_size, font=head, align="left")

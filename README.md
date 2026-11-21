@@ -234,7 +234,7 @@ callout_boxes = { note = "참고", warning = "주의", example = "예제" }
 | 구역 | 정하는 것 |
 |---|---|
 | `[page]` | 용지, 여백, 기본 단 수·간격·구분선 |
-| `[font]`, `[heading]` | 본문/제목 글꼴·크기·줄 간격·색 |
+| `[font]`, `[heading]` | 본문/제목 글꼴·크기·줄 간격·색, 글꼴별 장평 `ratio = { "함초롬바탕" = 95 }`·자간 `spacing = { "함초롬바탕" = -2 }` |
 | `[equation]` | 수식 글꼴(`HancomEQN`/`HYhwpEQ`)과 크기 |
 | `[header]`, `[footer]` | 머리말·꼬리말 (`{page}`, `{total}`) |
 | `[chapter]` | 대단원마다 새 쪽 |
@@ -244,7 +244,7 @@ callout_boxes = { note = "참고", warning = "주의", example = "예제" }
 | `[heading.1]` ~ `[heading.6]` | 단계별 제목: 크기·색, 번호 색·크기, 보조 글 색, 아래 선 색·굵기 |
 | `[list]` | 글머리표 기호·색 |
 | `[table]` | `style = "booktabs"`(위·아래 굵은 선만) 또는 `"grid"`(모든 칸 테두리) |
-| `[cover]` | 표지 띠 색·높이, 제목·부제 크기와 색, 여백 |
+| `[cover]` | 표지 띠 색·높이, 제목·부제 크기와 색, 여백, 저자 줄 고정 위치 `author_y`(mm) |
 
 `[problem]`의 `layout = "header"`(번호 ↔ 출처 줄), `columns = 2`(문제는 자동 2단), `font`(문제 글꼴)와
 `[answers]`의 `quick_style = "grid"`, `entry_layout = "line"` 같은 항목은 `수능파이널.toml`에 설명과 함께 들어 있습니다.

@@ -154,6 +154,8 @@ class Theme:
     table_rule_color: str = "#000000"  # booktabs 굵은 선 색
     table_row_line_color: str | None = None  # booktabs 행 사이 가는 선 색 (None = 없음)
     heading_styles: dict = field(default_factory=dict)  # {단계: HeadingStyle}
+    font_ratio: dict = field(default_factory=dict)  # 글꼴별 장평(%) {"함초롬바탕": 95}
+    font_spacing: dict = field(default_factory=dict)  # 글꼴별 자간(%) {"함초롬바탕": -3}
 
 
 @dataclass
@@ -269,6 +271,29 @@ def _as_runs(content: Content | None) -> list[Run]:
     return [Run(item) if isinstance(item, str) else item for item in content]
 
 
+def _fit_columns(natural: list[float], total: float) -> list[float]:
+    """열 너비: 짧은 열(번호·과목 등)은 글자가 줄바꿈되지 않을 만큼 먼저 주고, 남는 너비를 긴 열에 나눈다."""
+    n = len(natural)
+    if sum(natural) <= total:
+        extra = total - sum(natural)
+        return [w + extra * w / sum(natural) for w in natural]
+    fixed: dict[int, float] = {}
+    while True:
+        rest = [i for i in range(n) if i not in fixed]
+        if not rest:
+            break
+        share = (total - sum(fixed.values())) / len(rest)
+        small = [i for i in rest if natural[i] <= share]
+        if not small:
+            break
+        for i in small:
+            fixed[i] = natural[i]
+    rest = [i for i in range(n) if i not in fixed]
+    remain = max(total - sum(fixed.values()), total * 0.1)
+    rest_sum = sum(natural[i] for i in rest) or 1
+    return [fixed[i] if i in fixed else remain * natural[i] / rest_sum for i in range(n)]
+
+
 def _distribute(total: int, weights: Sequence[float]) -> list[int]:
     s = sum(weights) or 1
     sizes = [int(total * w / s) for w in weights]
@@ -316,6 +341,8 @@ class HwpxDocument:
         )
         # 서식 id 0 = '바탕글' (간격 없는 기본 문단)
         self.styles = StyleRegistry(
+            font_ratio=dict(t.font_ratio),
+            font_spacing=dict(t.font_spacing),
             default_char=self._body_char,
             default_para=ParaStyle(align="JUSTIFY", line_spacing=t.line_spacing),
         )
@@ -325,6 +352,7 @@ class HwpxDocument:
         self._left = 0  # 현재 문맥의 추가 왼쪽 여백 (HWPUNIT)
         self._prefix: _Prefix | None = None
         self._keep_together = False
+        self._keep_last: tuple[_Paragraph, ParaStyle] | None = None
         self._bins: list[_BinItem] = []
         self._bin_by_hash: dict[str, str] = {}
         self._header: HeaderSpec | None = None
@@ -619,8 +647,10 @@ class HwpxDocument:
         if self._left:
             para_pr = replace(para_pr, left=para_pr.left + self._left)
         top = self.at_top_level
+        keep_style = None
         if self._keep_together and top:
-            para_pr = replace(para_pr, keep_with_next=True)
+            para_pr = replace(para_pr, keep_with_next=True, keep_lines=True)
+            keep_style = para_pr
         para = _Paragraph(
             self.styles.para(para_pr),
             style,
@@ -634,6 +664,8 @@ class HwpxDocument:
         if top:
             self._pending_page_break = self._pending_column_break = False
             self._pending_ctrls = {}
+        if keep_style is not None:
+            self._keep_last = (para, keep_style)
         self._sink.append(para)
 
     def _para_xml(self, p: _Paragraph, first_run: str = "") -> str:
@@ -659,6 +691,7 @@ class HwpxDocument:
         margin: tuple[int, int, int, int] | None = None,
         vert_align: str = "CENTER",
         height: int = 282,
+        span: tuple[int, int] = (1, 1),
     ) -> str:
         if not paragraphs:
             paragraphs = [_Paragraph(0, 0, '<hp:run charPrIDRef="0"><hp:t/></hp:run>', pid=self._next_para_id())]
@@ -671,7 +704,7 @@ class HwpxDocument:
             f"{''.join(self._para_xml(p) for p in paragraphs)}"
             "</hp:subList>"
             f'<hp:cellAddr colAddr="{col}" rowAddr="{row}"/>'
-            '<hp:cellSpan colSpan="1" rowSpan="1"/>'
+            f'<hp:cellSpan colSpan="{span[0]}" rowSpan="{span[1]}"/>'
             f'<hp:cellSz width="{width}" height="{height}"/>'
             f'<hp:cellMargin left="{left}" right="{right}" top="{top}" bottom="{bottom}"/>'
             "</hp:tc>"
@@ -727,6 +760,7 @@ class HwpxDocument:
         align: str = "LEFT",
         inline: bool = True,
         paper: bool = False,
+        paper_offset: tuple[int, int] = (0, 0),
     ) -> str:
         tbl_id = self._next_obj_id()
         self._zorder += 1
@@ -735,7 +769,8 @@ class HwpxDocument:
             text_wrap = "IN_FRONT_OF_TEXT"
             pos = (
                 '<hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="0" allowOverlap="1" holdAnchorAndSO="0" '
-                'vertRelTo="PAPER" horzRelTo="PAPER" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>'
+                'vertRelTo="PAPER" horzRelTo="PAPER" vertAlign="TOP" horzAlign="LEFT" '
+                f'vertOffset="{paper_offset[1]}" horzOffset="{paper_offset[0]}"/>'
             )
             out_margin = '<hp:outMargin left="0" right="0" top="0" bottom="0"/>'
         elif inline:
@@ -1022,6 +1057,26 @@ class HwpxDocument:
         cid = self.styles.char(self._tiny_char())
         self._append(para, 0, f'<hp:run charPrIDRef="{cid}">{tbl}<hp:t/></hp:run>', "", kind="object")
 
+    def add_paper_text(self, content: Content, *, x: float, y: float, width: float | None = None,
+                       size: float | None = None, color: str | None = None, font: str | None = None,
+                       bold: bool = False, align: str = "left") -> None:
+        """종이의 정해진 자리(x, y: 종이 왼쪽 위에서 mm)에 글자를 놓는다. 본문 흐름과 상관없음 (표지 저자 등)."""
+        w = units.mm(width) if width else self.page.width - 2 * units.mm(x)
+        char = replace(self._body_char, size=float(size) if size else self._body_char.size,
+                       color=normalize_color(color) or self._body_char.color, font=font or self._body_char.font,
+                       bold=bold)
+        h = units.pt(char.size * 1.6)
+        bf = self.styles.border(BorderFill())
+        with self._capture(w) as cps:
+            xml, plain = self._runs_xml(content, char)
+            self._append(ParaStyle(align=normalize_align(align), line_spacing=130), 0, xml, plain)
+        row = "<hp:tr>" + self._cell_xml(0, 0, w, cps, bf, margin=(0, 0, 0, 0), height=h) + "</hp:tr>"
+        tbl = self._table_xml([row], 1, w, h, bf, in_margin=(0, 0, 0, 0), inline=False, paper=True,
+                              paper_offset=(units.mm(x), units.mm(y)))
+        para = replace(self._body_para, line_spacing=100, space_after=0, space_before=0)
+        cid = self.styles.char(self._tiny_char())
+        self._append(para, 0, f'<hp:run charPrIDRef="{cid}">{tbl}<hp:t/></hp:run>', "", kind="object")
+
     def add_spacer(self, height_mm: float) -> None:
         """빈 공간 (풀이 공간 등)."""
         self._gap(units.mm(height_mm))
@@ -1038,10 +1093,18 @@ class HwpxDocument:
         """안쪽 문단을 모두 '다음 문단과 함께' 로 묶어 쪽·단 경계에서 나뉘지 않게 한다 (문제 하나 등)."""
         saved = self._keep_together
         self._keep_together = True
+        if not saved:
+            self._keep_last = None
         try:
             yield
         finally:
             self._keep_together = saved
+            if not saved and self._keep_last is not None:
+                # 묶음의 마지막 문단은 다음 문단과 묶지 않는다. 모두 이어 묶으면 한글이 묶음을
+                # 지키지 못하고 아무 데서나 나눈다 (문제가 단·쪽 경계에서 잘리던 원인).
+                para, style = self._keep_last
+                para.para_pr = self.styles.para(replace(style, keep_with_next=False))
+                self._keep_last = None
 
     def add_page_break(self) -> None:
         """다음 문단을 새 쪽에서 시작한다."""
@@ -1146,7 +1209,44 @@ class HwpxDocument:
         rows_xml = []
         row = 0
         if head_runs and st.kind == "titled":
-            # 제목을 상자 위 가운데에 (〈보 기〉 모양)
+            # 〈보 기〉: 이름표가 상자 윗선 한가운데에 걸린 모양 (수능 시험지).
+            # 3열 표로 만든다. 윗선은 이름표 양옆 칸에만 긋고, 이름표 칸은 두 줄에 걸쳐 선 높이 가운데에 둔다.
+            line = Line(st.border_type, st.border_width, border_color)
+            fill = normalize_color(st.background) if st.background else None
+            none_bf = self.styles.border(BorderFill())
+            tchar = replace(self._body_char, color=normalize_color(st.title_color) or self._body_char.color)
+            label_runs = [replace(r, bold=False) for r in head_runs]
+            lw = min(self.estimate_width(label_runs, tchar.size) + units.pt(tchar.size * 1.4), width // 2)
+            side = (width - lw) // 2
+            mid = width - 2 * side
+            half = units.pt(tchar.size * 0.75)
+            with self._capture(mid) as tparas:
+                xml, plain_t = self._runs_xml(label_runs, tchar)
+                self._append(ParaStyle(align="CENTER", line_spacing=100), 0, xml, plain_t)
+            left_bf = self.styles.border(BorderFill(left=line, top=line))
+            right_bf = self.styles.border(BorderFill(right=line, top=line))
+            body_bf = self.styles.border(BorderFill(left=line, right=line, bottom=line, fill=fill))
+            zero = (0, 0, 0, 0)
+            rows_xml = [
+                "<hp:tr>"
+                + self._cell_xml(0, 0, side, [], none_bf, margin=zero, height=half)
+                + self._cell_xml(0, 1, mid, tparas, none_bf, margin=zero, height=2 * half, span=(1, 2))
+                + self._cell_xml(0, 2, side, [], none_bf, margin=zero, height=half)
+                + "</hp:tr>",
+                "<hp:tr>"
+                + self._cell_xml(1, 0, side, [], left_bf, margin=zero, height=half)
+                + self._cell_xml(1, 2, side, [], right_bf, margin=zero, height=half)
+                + "</hp:tr>",
+                "<hp:tr>"
+                + self._cell_xml(2, 0, width, paras, body_bf, margin=(pad, pad, units.pt(2), max(pad - units.pt(4), 0)),
+                                 vert_align="TOP", span=(3, 1))
+                + "</hp:tr>",
+            ]
+            self._place_table(rows_xml, 3, width, 2 * half + 282, none_bf, page_break="NONE",
+                              in_margin=(pad, pad, pad, pad), space_after=self.theme.paragraph_spacing + 4,
+                              plain="\n".join(p.plain for p in paras))
+            return
+        if False:  # (옛 모양: 이름표를 상자 위에 따로)
             none_bf = self.styles.border(BorderFill())
             with self._capture(inner) as tparas:
                 tchar = replace(self._body_char, color=normalize_color(st.title_color) or self._body_char.color)
@@ -1220,10 +1320,11 @@ class HwpxDocument:
         if col_widths and len(col_widths) == n_cols:
             weights = [max(float(w), 0.01) for w in col_widths]
         else:
-            weights = []
-            for c in range(n_cols):
-                longest = max(self.estimate_width(row[c]) for row in grid) / max(units.pt(t.font_size) / 2, 1)
-                weights.append(min(max(longest, 4), 40))
+            weights = _fit_columns(
+                [max(self.estimate_width(row[c]) for row in grid) * 1.1 + 2 * 510 + units.pt(t.font_size)
+                 for c in range(n_cols)],
+                total_width,
+            )
         widths = _distribute(total_width, weights)
         col_align = [normalize_align(a, "LEFT") if a else "LEFT" for a in (align or [])]
         col_align += ["LEFT"] * (n_cols - len(col_align))
@@ -1332,10 +1433,11 @@ class HwpxDocument:
             items.append([Run(mark + " ")] + _as_runs(choice))
         width = self.available_width
         if columns is None:
-            longest = max(self.estimate_width(it) for it in items) + units.pt(self.theme.font_size)
+            longest = max(self.estimate_width(it, self._body_char.size) for it in items)
+            gap = units.pt(self._body_char.size * 1.5)  # 칸마다 남길 최소 여백 (보기끼리 붙어 보이지 않게)
             columns = 1
             for cand in (5, 3, 2):
-                if cand <= len(items) and longest * cand <= width:
+                if cand <= len(items) and (longest + gap) * cand <= width:
                     columns = cand
                     break
             if columns == 3 and len(items) == 4:

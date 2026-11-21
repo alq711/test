@@ -23,6 +23,10 @@ def _all_langs(value: object) -> str:
     return " ".join(f'{name}="{value}"' for name in _LANG_ATTRS)
 
 
+def _clamp(value: object, low: int, high: int) -> int:
+    return max(low, min(high, round(float(value))))  # type: ignore[arg-type]
+
+
 def normalize_align(value: str | None, default: str = "JUSTIFY") -> str:
     if not value:
         return default
@@ -119,7 +123,7 @@ class ParaStyle:
     keep_with_next: bool = False
     keep_lines: bool = False
     break_latin_word: str = "KEEP_WORD"
-    break_non_latin_word: str = "BREAK_WORD"
+    break_non_latin_word: str = "KEEP_WORD"  # 한글: KEEP_WORD = 글자 단위로 나눔 (BREAK_WORD 는 어절 단위라 양쪽 정렬 때 빈칸이 벌어짐)
 
 
 @dataclass
@@ -142,6 +146,8 @@ class StyleRegistry:
 
     default_char: CharStyle = field(default_factory=CharStyle)
     default_para: ParaStyle = field(default_factory=ParaStyle)
+    font_ratio: dict = field(default_factory=dict)  # 글꼴 이름 → 장평(%), 예: {"함초롬바탕": 95}
+    font_spacing: dict = field(default_factory=dict)  # 글꼴 이름 → 자간(%), 예: {"함초롬바탕": -3}
 
     def __post_init__(self) -> None:
         self._fonts: list[str] = []
@@ -254,8 +260,8 @@ class StyleRegistry:
                 f'<hh:charPr id="{cs_id}" height="{height}" textColor="{cs.color}" shadeColor="{cs.shade}" '
                 f'useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="{cs.border_fill}">',
                 f"<hh:fontRef {_all_langs(font_id)}/>",
-                f"<hh:ratio {_all_langs(100)}/>",
-                f"<hh:spacing {_all_langs(0)}/>",
+                f"<hh:ratio {_all_langs(_clamp(self.font_ratio.get(cs.font, 100), 50, 200))}/>",
+                f"<hh:spacing {_all_langs(_clamp(self.font_spacing.get(cs.font, 0), -50, 50))}/>",
                 f"<hh:relSz {_all_langs(100)}/>",
                 f"<hh:offset {_all_langs(0)}/>",
             ]
@@ -280,10 +286,13 @@ class StyleRegistry:
     @staticmethod
     def _margin_xml(ps: ParaStyle, scale: int) -> str:
         unit = ' unit="HWPUNIT"'
+        # ParaStyle 은 CSS 처럼 left = 둘째 줄부터의 왼쪽 여백, indent < 0 = 첫 줄을 그만큼 왼쪽으로.
+        # 한글의 '내어쓰기'는 반대로 첫 줄을 왼쪽 여백에 두고 둘째 줄부터 밀어 넣으므로 여기서 바꿔 적는다.
+        left = ps.left + min(ps.indent, 0)
         return (
             "<hh:margin>"
             f'<hc:intent value="{ps.indent * scale}"{unit}/>'
-            f'<hc:left value="{ps.left * scale}"{unit}/>'
+            f'<hc:left value="{left * scale}"{unit}/>'
             f'<hc:right value="{ps.right * scale}"{unit}/>'
             f'<hc:prev value="{ps.space_before * scale}"{unit}/>'
             f'<hc:next value="{ps.space_after * scale}"{unit}/>'

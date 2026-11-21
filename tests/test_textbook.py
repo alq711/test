@@ -376,3 +376,74 @@ def test_span_font_family_size_and_style():
     head = validate(doc.to_bytes())["Contents/header.xml"]
     from test_hwpx import HH
     assert "나눔스퀘어" in {f.get("face") for f in head.iter(HH + "font")}
+
+
+# ---------------------------------------------------------------------------
+# 시중 교재 모양 맞춤: 장평·자간, 문제 묶음, 내어쓰기, 〈보 기〉
+# ---------------------------------------------------------------------------
+
+
+def _header_and_section(data: bytes):
+    trees = validate(data)
+    return trees["Contents/header.xml"], trees["Contents/section0.xml"]
+
+
+def test_font_ratio_and_spacing_from_template(tmp_path):
+    t = template_from_dict({"font": {"body": "함초롬돋움", "ratio": {"함초롬바탕": 95}, "spacing": -3}})
+    assert t.warnings == []
+    assert t.theme.font_ratio == {"함초롬바탕": 95}
+    assert t.theme.font_spacing == {"함초롬돋움": -3}
+    out = tmp_path / "r.hwpx"
+    build_textbook("::: 문제\n본문\n:::\n", out, template="수능파이널")
+    head, _ = _header_and_section(out.read_bytes())
+    HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
+    fonts = [f.get("face") for f in head.find(f".//{HH}fontface").findall(HH + "font")]
+    batang = str(fonts.index("함초롬바탕"))
+    ratios = {cp.find(HH + "fontRef").get("hangul"): cp.find(HH + "ratio").get("hangul") for cp in head.iter(HH + "charPr")}
+    assert ratios[batang] == "95"
+
+
+def test_problem_keep_together_releases_last_paragraph():
+    doc = HwpxDocument()
+    with doc.keep_together():
+        doc.add_paragraph("하나")
+        doc.add_paragraph("둘")
+    doc.add_paragraph("다음 문제")
+    head, sec = _header_and_section(doc.to_bytes())
+    HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
+    keep = {pp.get("id"): pp.find(HH + "breakSetting").get("keepWithNext") for pp in head.iter(HH + "paraPr")}
+    paras = {"".join(t.text or "" for t in p.iter(HP + "t")): p.get("paraPrIDRef") for p in sec.iter(HP + "p")}
+    assert keep[paras["하나"]] == "1"
+    assert keep[paras["둘"]] == "0"  # 묶음 끝은 다음 문단과 묶지 않아야 한글이 묶음을 지킨다
+
+
+def test_hanging_indent_uses_hangul_semantics():
+    doc = HwpxDocument()
+    doc.add_list_item("항목")
+    head, sec = _header_and_section(doc.to_bytes())
+    HH, HC = "{http://www.hancom.co.kr/hwpml/2011/head}", "{http://www.hancom.co.kr/hwpml/2011/core}"
+    pid = next(p.get("paraPrIDRef") for p in sec.iter(HP + "p") if "항목" in "".join(t.text or "" for t in p.iter(HP + "t")))
+    pp = next(pp for pp in head.iter(HH + "paraPr") if pp.get("id") == pid)
+    case = pp.find(".//" + HH + "margin")
+    assert int(case.find(HC + "intent").get("value")) < 0
+    assert case.find(HC + "left").get("value") == "0"  # 글머리표는 본문 왼쪽 끝, 둘째 줄부터 들여씀
+
+
+def test_bogi_label_sits_on_box_border():
+    doc = HwpxDocument()
+    from hwpxwriter.document import BoxStyle
+    with doc.box(label="〈보 기〉", style=BoxStyle(kind="titled")):
+        doc.add_paragraph("ㄱ. 내용")
+    _, sec = _header_and_section(doc.to_bytes())
+    tbl = next(sec.iter(HP + "tbl"))
+    assert tbl.get("colCnt") == "3" and tbl.get("rowCnt") == "3"
+    spans = [(s.get("colSpan"), s.get("rowSpan")) for s in tbl.iter(HP + "cellSpan")]
+    assert ("1", "2") in spans and ("3", "1") in spans
+
+
+def test_cover_author_fixed_position(tmp_path):
+    out = tmp_path / "c.hwpx"
+    build_textbook("::: 표지\n제목: 책\n설명:\n" + "긴 설명\n" * 40 + "저자: 이름\n:::\n", out, template="수능파이널")
+    _, sec = _header_and_section(out.read_bytes())
+    pos = [t.find(HP + "pos") for t in sec.iter(HP + "tbl")]
+    assert any(p.get("vertRelTo") == "PAPER" and int(p.get("vertOffset")) > 0 for p in pos)
