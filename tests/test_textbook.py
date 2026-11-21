@@ -237,3 +237,93 @@ def test_cli_template_and_init(tmp_path: Path):
     assert cli_main([str(src), "--template", str(tpl)]) == 0
     validate((tmp_path / "교재.hwpx").read_bytes())
     assert cli_main([str(src), "-t", str(tmp_path / "없음.toml")]) == 2
+
+
+# ---------------------------------------------------------------------------
+# '수능 파이널' 모양 (표지, 바뀌는 머리말, 출처 줄, 〈보기〉, 정답 격자)
+# ---------------------------------------------------------------------------
+
+SUNEUNG = Path(__file__).resolve().parent.parent / "examples" / "수능파이널_예시.md"
+
+
+def test_suneung_template_loads_without_warnings():
+    t = load_template("수능파이널")
+    assert not t.warnings
+    assert t.problem.layout == "header" and t.problem.columns == 2
+    assert t.boxes["보기"].style.kind == "titled" and t.boxes["주의"].style.kind == "tag"
+    assert 1 in t.theme.heading_styles and t.theme.heading_styles[1].number_color
+
+
+def test_suneung_example_structure(tmp_path: Path):
+    from test_hwpx import HC, HH
+
+    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), tmp_path / "s.hwpx", template="수능파이널",
+                         base_dir=SUNEUNG.parent)
+    assert doc.warnings == []
+    trees = validate((tmp_path / "s.hwpx").read_bytes())
+    sec, head = trees["Contents/section0.xml"], trees["Contents/header.xml"]
+    # 표지: 첫 쪽 머리말 감춤 + 종이 기준 띠
+    vis = sec.find(f".//{HP}visibility")
+    assert vis.get("hideFirstHeader") == "1" and vis.get("hideFirstFooter") == "1"
+    assert any(t.find(HP + "pos").get("vertRelTo") == "PAPER" for t in sec.iter(HP + "tbl"))
+    # 번호 단원 첫 쪽만 머리말 감춤 (09, 10)
+    assert len(list(sec.iter(HP + "pageHiding"))) == 2
+    # 머리말 오른쪽 글이 단원마다 바뀜
+    header_texts = ["".join(t.text or "" for t in h.iter(HP + "t")) for h in sec.iter(HP + "header")]
+    assert any("공통 9번" in x for x in header_texts) and any("정답과 해설" in x for x in header_texts)
+    # 개념 1단 ↔ 문제 2단
+    assert [c.get("colCount") for c in sec.iter(HP + "colPr")] == ["1", "2", "1", "2", "1", "2"]
+    # 번호는 책 전체 이어서 01~07, 정답 격자 10칸
+    text = doc.plain_text()
+    assert "07" in text and text.count("정답과 해설") == 1
+    assert any(t.get("colCnt") == "10" for t in sec.iter(HP + "tbl"))
+    # 수식 줄 회색 배경(개념), 문제 안 수식은 배경 없음
+    fills = {bf.get("id") for bf in head.iter(HH + "borderFill")
+             if (wb := bf.find(f".//{HC}winBrush")) is not None and wb.get("faceColor") == "#F2F2F2"}
+    para_bg = {pp.get("id") for pp in head.iter(HH + "paraPr") if pp.find(HH + "border").get("borderFillIDRef") in fills}
+    eq_paras = [p for p in sec.iter(HP + "p") if p.find(f"{HP}run/{HP}equation") is not None
+                and all(r.find(HP + "t") is None or not (r.find(HP + "t").text or "").strip() for r in p.findall(HP + "run"))]
+    assert any(p.get("paraPrIDRef") in para_bg for p in eq_paras)
+    assert any(p.get("paraPrIDRef") not in para_bg for p in eq_paras)
+    # 〈보기〉 상자와 ㄱ. ㄴ. ㄷ.
+    sec_text = "".join(t.text or "" for t in sec.iter(HP + "t"))
+    assert sec_text.count("〈보 기〉") == 3 and "ㄱ. " in text
+
+
+def test_split_heading():
+    from hwpxwriter.markdown import split_heading
+
+    assert split_heading("09 수직선 위의 운동", True) == ("09", "수직선 위의 운동", None)
+    assert split_heading("최근 기출 | 공통 9번", True) == (None, "최근 기출", "공통 9번")
+    assert split_heading("Ⅱ. 방정식", True) == ("Ⅱ", "방정식", None)
+    assert split_heading("09 그대로", False) == (None, "09 그대로", None)
+
+
+def test_span_color_and_jamo_items():
+    runs = parse_inline('<span style="color:#1F3864">**높음**</span> 보통')
+    assert runs[0].text == "높음" and runs[0].bold and runs[0].color == "#1F3864"
+    doc = HwpxDocument()
+    doc.add_markdown("ㄱ. 첫째 줄\n이어지는 줄\nㄴ. 둘째\n")
+    assert doc.plain_text().split("\n") == ["ㄱ. 첫째 줄 이어지는 줄", "ㄴ. 둘째"]
+
+
+def test_header_split_and_change_mid_document():
+    doc = HwpxDocument()
+    doc.set_header("책 이름", right="1단원", rule="#999999")
+    doc.add_paragraph("a")
+    doc.hide_on_this_page()
+    doc.change_header("책 이름", right="2단원", rule="#999999")
+    doc.add_paragraph("b")
+    sec = validate(doc.to_bytes())["Contents/section0.xml"]
+    headers = list(sec.iter(HP + "header"))
+    assert len(headers) == 2
+    assert all(h.find(f".//{HP}tbl") is not None for h in headers)
+    p_b = [p for p in sec.findall(HP + "p") if "".join(t.text or "" for t in p.iter(HP + "t")).endswith("b")][0]
+    assert p_b.find(f".//{HP}pageHiding") is not None and p_b.find(f".//{HP}header") is not None
+
+
+def test_cli_init_from_builtin(tmp_path: Path):
+    out = tmp_path / "내양식.toml"
+    assert cli_main(["--init-template", str(out), "-t", "수능파이널"]) == 0
+    assert 'layout = "header"' in out.read_text(encoding="utf-8")
+    assert not load_template(out).warnings

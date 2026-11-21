@@ -1,0 +1,184 @@
+# ============================================================
+#  '수능 파이널' 모양 양식
+#    - 표지: 위쪽 남색 띠, 큰 제목, 남색 부제
+#    - 머리말: 왼쪽 책 이름 | 오른쪽 단원 이름(남색 굵게), 아래 가는 선
+#      (번호 단원 첫 쪽은 머리말·쪽 번호 감춤)
+#    - 단원 제목: 큰 남색 번호 + 제목 + 굵은 남색 선
+#    - 핵심 개념은 고딕, 문제·해설은 명조. 수식 줄은 회색 배경
+#    - 문제: 2단 + 가운데 세로선, '01 …… 출처' 머리줄
+#    - 정답과 해설: 10칸 정답표 + 문항별 '01 출처 …… 정답 ①'
+#
+#  사용: md2hwpx 교재.md -t 수능파이널
+#  고쳐 쓰기: md2hwpx --init-template 내양식.toml -t 수능파이널
+#  길이: mm, 글자 크기·간격: pt, 색: "#RRGGBB"
+# ============================================================
+
+title = ""
+
+[page]
+paper = "A4"
+margin = [15, 16, 15, 16]     # 위, 오른쪽, 아래, 왼쪽
+margin_header = 10
+margin_footer = 10
+columns = 1                   # 개념 부분은 1단 (문제가 나오면 [problem] columns 로 자동 전환)
+column_gap = 8
+column_line = true
+
+[font]
+body = "함초롬돋움"            # 핵심 개념 등 본문 (고딕)
+heading = "함초롬돋움"
+code = "굴림체"
+size = 9.5
+line_spacing = 165
+paragraph_spacing = 3
+color = "#222222"
+
+[heading]
+color = "#222222"
+
+[heading.1]                   # # 09 수직선 위의 운동
+size = 20
+color = "#222222"
+number_color = "#1F3864"
+number_size = 34
+rule_color = "#1F3864"
+rule_width = "0.7 mm"
+rule_gap = 6
+space_before = 0
+space_after = 16
+
+[heading.2]                   # ## 핵심 개념   /   ## 최근 기출 | 공통 9번
+size = 11.5
+color = "#1F3864"
+sub_color = "#333333"
+rule_color = "#BFBFBF"
+rule_width = "0.12 mm"
+rule_gap = 7
+space_before = 12
+space_after = 10
+
+[heading.3]                   # ### 1 위치·속도·가속도의 관계
+size = 11
+color = "#222222"
+number_color = "#1F3864"
+number_font = "함초롬바탕"
+space_before = 9
+space_after = 5
+
+[equation]
+font = "HancomEQN"
+size = 0
+display_align = "center"
+display_background = "#F2F2F2"   # $$수식$$ 줄 회색 배경 (문제·해설 안에서는 배경 없음)
+
+[list]
+bullet = "▪"
+bullet_color = "#1F3864"
+
+[table]
+style = "booktabs"            # 위·아래 굵은 선, 제목 줄 아래 가는 선
+rule_color = "#000000"
+row_line_color = "#D9D9D9"
+
+[header]
+left = "수능 파이널 | 번호별 출제 예측"
+right = "{chapter}"           # 단원 제목 (본문에서 \머리말 공통 9번 처럼 바꿀 수 있음)
+align = "left"
+rule = "#999999"
+right_color = "#1F3864"
+right_bold = true
+
+[footer]
+text = "{page}"
+align = "center"
+
+[chapter]
+new_page = true
+hide_header = "numbered"      # '# 09 …' 처럼 번호 있는 단원 첫 쪽은 머리말·꼬리말 감춤
+
+[cover]
+band_color = "#1F3864"
+band_height = 6
+top_space = 75
+top_size = 11
+top_color = "#595959"
+title_size = 44
+title_color = "#222222"
+subtitle_size = 19
+subtitle_sub_size = 12
+subtitle_color = "#1F3864"
+desc_size = 8.5
+desc_color = "#595959"
+author_space = 120
+
+[problem]
+layout = "header"             # 01 ………… 2027학년도 9월 모의평가 9번
+number_format = "{n:02d}"
+number_color = "#222222"
+number_size = 13
+source_size = 7.5
+source_color = "#595959"
+reset = "never"               # 책 전체 01 ~ 85 이어서
+space_after = 22              # 문제 뒤 풀이 공간 (mm)
+font = "함초롬바탕"            # 문제 본문은 명조
+size = 10
+line_spacing = 180
+display_align = "left"        # 문제 안 수식 줄은 왼쪽, 살짝 들여씀
+display_indent = 4
+columns = 2                   # 문제가 나오면 2단으로
+column_line = true
+
+[answers]
+title = "정답과 해설"
+new_page = true
+columns = 2
+column_line = true
+quick_table = true
+quick_style = "grid"          # 위 번호 / 아래 정답, 10칸
+quick_columns = 10
+entry_layout = "line"         # 01 출처 …………… 정답 ①  + 가는 선
+rule_color = "#BFBFBF"
+answer_label = "정답"
+show_chapters = false
+font = "함초롬바탕"
+size = 9.5
+line_spacing = 160
+
+# ------------------------------------------------------------
+#  상자  ( ::: 이름 ... ::: )
+# ------------------------------------------------------------
+[box."보기"]                  # 〈보 기〉 상자
+kind = "titled"
+label = "〈보 기〉"
+border_color = "#000000"
+border_width = "0.12 mm"
+title_color = "#000000"
+padding = 2.5
+
+[box."주의"]                  # [주의] 테두리 꼬리표
+kind = "tag"
+border_color = "#000000"
+label_color = "#000000"
+title_size = 7.5
+
+[box."참고"]
+kind = "tag"
+border_color = "#1F3864"
+label_color = "#1F3864"
+title_size = 7.5
+
+[box."정의"]
+kind = "bar"
+numbered = false
+border_color = "#1F3864"
+title_background = "#1F3864"
+title_color = "#FFFFFF"
+background = "#F5F7FB"
+
+[box."예제"]
+kind = "inline"
+border_color = "#7F7F7F"
+label_color = "#1F3864"
+border_width = "0.12 mm"
+solution_label = "풀이"
+solution_color = "#1F3864"

@@ -138,6 +138,19 @@ def parse_inline(text: str, base: Run | None = None, link_color: str = "#0563C1"
                 buf.append("\n")
                 i += m.end()
                 continue
+            m = re.match(r"<(span|font)\b([^>]*)>", text[i:], re.I)
+            if m:
+                tag = m.group(1).lower()
+                close = re.search(rf"</{tag}\s*>", text[i + m.end() :], re.I)
+                color = re.search(r"color\s*[:=]\s*[\"']?\s*(#[0-9a-fA-F]{3,6})", m.group(2))
+                if close:
+                    inner = text[i + m.end() : i + m.end() + close.start()]
+                    if color:
+                        wrap(inner, color=color.group(1))
+                    else:
+                        wrap(inner)
+                    i += m.end() + close.end()
+                    continue
             m = re.match(r"<(\w+)(?:\s[^>]*)?>", text[i:])
             if m and m.group(1).lower() in _HTML_TAGS:
                 tag = m.group(1).lower()
@@ -291,6 +304,21 @@ _DISPLAY_OPEN = re.compile(r"^\s*(\$\$|\\\[)(.*)$")
 _CHOICE_MARKS = "①②③④⑤⑥⑦⑧⑨⑩"
 _CHOICE_START = re.compile(rf"^\s*[{_CHOICE_MARKS}]")
 _KNOWN_DIRECTIVES = {"columns", "columnbreak", "vspace", "newpage", "pagebreak", "clearpage"}
+_JAMO_ITEM = re.compile(r"^\s*([ㄱ-ㅎ])[.)]\s+(.*)$")
+_HEADING_NUMBER = re.compile(r"^(\d{1,3}|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]{1,4})[.)]?\s+(\S.*)$")
+
+
+def split_heading(raw: str, styled: bool) -> tuple[str | None, str, str | None]:
+    """'09 수직선 위의 운동 | 공통 9번' → ('09', '수직선 위의 운동', '공통 9번'). styled=False 면 그대로."""
+    if not styled:
+        return None, raw, None
+    sub = None
+    if " | " in raw:
+        raw, sub = (part.strip() for part in raw.split(" | ", 1))
+    m = _HEADING_NUMBER.match(raw)
+    if m:
+        return m.group(1), m.group(2).strip(), sub
+    return None, raw, sub
 
 
 def _starts_block(line: str, next_line: str | None) -> bool:
@@ -305,6 +333,7 @@ def _starts_block(line: str, next_line: str | None) -> bool:
         or _CONTAINER_OPEN.match(line)
         or _DISPLAY_OPEN.match(line)
         or _CHOICE_START.match(line)
+        or _JAMO_ITEM.match(line)
         or (_DIRECTIVE.match(line) and not line.lstrip().startswith("\\["))
         or ("|" in line and next_line is not None and _TABLE_SEP.match(next_line) and "-" in next_line)
     )
@@ -468,8 +497,11 @@ def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path, handler: 
         m = _HEADING.match(line)
         if m:
             raw = (m.group(2) or "").strip()
-            if not handler.heading(doc, len(m.group(1)), raw, inline):
-                doc.add_heading(inline(raw), level=len(m.group(1)))
+            level = len(m.group(1))
+            if not handler.heading(doc, level, raw, inline):
+                styled = level in doc.theme.heading_styles or str(level) in doc.theme.heading_styles
+                number, title, sub = split_heading(raw, styled)
+                doc.add_heading(inline(title), level=level, number=number, sub=inline(sub) if sub else None)
             i += 1
             continue
 
@@ -512,6 +544,21 @@ def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path, handler: 
         # 목록
         if _LIST.match(line):
             i = _render_list(doc, lines, i, inline)
+            continue
+
+        # ㄱ. ㄴ. ㄷ. 항목
+        if _JAMO_ITEM.match(line):
+            while i < n and lines[i].strip():
+                jm = _JAMO_ITEM.match(lines[i])
+                if not jm:
+                    break
+                text_lines = [jm.group(2)]
+                i += 1
+                while i < n and lines[i].strip() and not _JAMO_ITEM.match(lines[i]) \
+                        and not _starts_block(lines[i], None):
+                    text_lines.append(lines[i].strip())
+                    i += 1
+                doc.add_list_item(inline("\n".join(text_lines)), marker=jm.group(1) + ".")
             continue
 
         # 객관식 보기 ① ② ③ ...

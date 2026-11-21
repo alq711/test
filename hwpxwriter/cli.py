@@ -34,8 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("교재 양식")
     g.add_argument("-t", "--template", metavar="양식.toml",
-                   help="교재 양식 파일로 변환 (문제·상자·정답과 해설). '기본' 이면 내장 수학 교재 양식")
-    g.add_argument("--init-template", metavar="경로.toml", help="고쳐 쓸 수 있는 기본 양식 파일을 만들고 끝냄")
+                   help="교재 양식 파일로 변환 (문제·상자·정답과 해설). 내장 양식: 기본(=수학교재), 수능파이널")
+    g.add_argument("--init-template", metavar="경로.toml",
+                   help="고쳐 쓸 수 있는 양식 파일을 만들고 끝냄 (--template 으로 바탕 양식 선택)")
 
     g = p.add_argument_group("머리말·꼬리말")
     g.add_argument("--header", help="머리말 글자 ({page}=쪽 번호, {total}=전체 쪽 수)")
@@ -76,7 +77,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.init_template:
         from .textbook import write_default_template
 
-        print(f"양식 파일을 만들었습니다: {write_default_template(args.init_template)}")
+        try:
+            made = write_default_template(args.init_template, base=args.template)
+        except OSError as exc:
+            print(f"오류: {exc}", file=sys.stderr)
+            return 2
+        print(f"양식 파일을 만들었습니다: {made}")
         return 0
     if not args.inputs:
         parser.error("입력 파일을 적어 주세요")
@@ -85,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         from .textbook import load_template
 
         try:
-            template = load_template(None if args.template in ("기본", "default", "math") else args.template)
+            template = load_template(args.template)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"오류: 양식을 읽지 못했습니다 — {exc}", file=sys.stderr)
             return 2
@@ -142,11 +148,13 @@ def main(argv: list[str] | None = None) -> int:
                 if args.header or args.footer or args.page_number:
                     from dataclasses import replace as _replace
 
+                    from .textbook import HeaderDef
+
                     tpl = _replace(
                         tpl,
-                        header=(args.header, "right") if args.header else tpl.header,
-                        footer=(args.footer, "center") if args.footer
-                        else ("- {page} -", "center") if args.page_number else tpl.footer,
+                        header=HeaderDef(args.header, align="right") if args.header else tpl.header,
+                        footer=HeaderDef(args.footer) if args.footer
+                        else HeaderDef("- {page} -") if args.page_number else tpl.footer,
                     )
                 doc = Textbook(tpl).build(source, base_dir=base_dir, title=args.title or src_path.stem)
             elif args.text or src_path.suffix.lower() == ".txt":

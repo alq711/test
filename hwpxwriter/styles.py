@@ -68,6 +68,7 @@ class CharStyle:
     shade: str = "none"  # 글자 배경(음영) 색
     superscript: bool = False
     subscript: bool = False
+    border_fill: int = 2  # 글자 테두리 (2 = 없음)
 
 
 @dataclass(frozen=True)
@@ -251,7 +252,7 @@ class StyleRegistry:
             height = round(cs.size * 100)
             parts = [
                 f'<hh:charPr id="{cs_id}" height="{height}" textColor="{cs.color}" shadeColor="{cs.shade}" '
-                'useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">',
+                f'useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="{cs.border_fill}">',
                 f"<hh:fontRef {_all_langs(font_id)}/>",
                 f"<hh:ratio {_all_langs(100)}/>",
                 f"<hh:spacing {_all_langs(0)}/>",
