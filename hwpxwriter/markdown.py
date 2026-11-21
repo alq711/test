@@ -244,7 +244,7 @@ _FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})\s*([\w+#.-]*)")
 _LIST = re.compile(r"^([ \t]*)([-*+]|\d{1,9}[.)])[ \t]+(.*)$")
 _TASK = re.compile(r"^\[([ xX])\][ \t]+")
 _TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$")
-_IMAGE_BLOCK = re.compile(r"^\s*!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+\"([^\"]*)\")?\s*\)(\{[^}]*\})?\s*$")
+_IMAGE_BLOCK = re.compile(r"^\s*!\[([^\]]*)\]\(\s*(?:<([^>]+)>|([^)\s]+))(?:\s+\"([^\"]*)\")?\s*\)(\{[^}]*\})?\s*$")
 _PAGEBREAK = re.compile(r"^\s*(\\newpage|\\pagebreak|<!--\s*(page\s*-?break|newpage)\s*-->)\s*$", re.I)
 _SETEXT = re.compile(r"^ {0,3}(=+|-+)\s*$")
 _QUOTE = re.compile(r"^ {0,3}>\s?")
@@ -527,8 +527,8 @@ def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path, handler: 
         # 그림 (한 줄 전체가 그림일 때)
         m = _IMAGE_BLOCK.match(line)
         if m:
-            alt, src, title, attrs = m.groups()
-            _add_image(doc, base_dir, src, alt, title, _image_attrs(attrs), inline)
+            alt, src_angle, src_plain, title, attrs = m.groups()
+            _add_image(doc, base_dir, src_angle or src_plain, alt, title, _image_attrs(attrs), inline)
             i += 1
             continue
 

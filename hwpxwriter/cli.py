@@ -35,6 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     g = p.add_argument_group("교재 양식")
     g.add_argument("-t", "--template", metavar="양식.toml",
                    help="교재 양식 파일로 변환 (문제·상자·정답과 해설). 내장 양식: 기본(=수학교재), 수능파이널")
+    g.add_argument("--vault", metavar="볼트 폴더",
+                   help="Obsidian 볼트 폴더 (![[노트]] 와 그림을 찾을 곳). 노트가 볼트 안에 있으면 자동으로 찾음")
     g.add_argument("--init-template", metavar="경로.toml",
                    help="고쳐 쓸 수 있는 양식 파일을 만들고 끝냄 (--template 으로 바탕 양식 선택)")
 
@@ -69,6 +71,12 @@ def _page_setup(args: argparse.Namespace) -> PageSetup:
     if args.margin:
         page.margin_top, page.margin_right, page.margin_bottom, page.margin_left = args.margin
     return page
+
+
+def _in_vault(path: Path) -> bool:
+    from .obsidian import find_vault_root
+
+    return find_vault_root(path) is not None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,7 +149,16 @@ def main(argv: list[str] | None = None) -> int:
                 footer=args.footer,
                 page_number=args.page_number,
             )
-            if template is not None and not args.text:
+            obsidian_mode = (
+                name != "-" and not args.text and src_path.suffix.lower() == ".md"
+                and (args.vault or "[[" in source or _in_vault(src_path))
+            )
+            if obsidian_mode:
+                from .textbook import build_from_obsidian
+
+                doc = build_from_obsidian(src_path, vault=args.vault, template=template or args.template,
+                                          title=args.title)
+            elif template is not None and not args.text:
                 from .textbook import Textbook
 
                 tpl = template

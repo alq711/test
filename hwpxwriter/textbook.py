@@ -167,6 +167,7 @@ class Template:
     answers: AnswerStyle = field(default_factory=AnswerStyle)
     cover: CoverStyle = field(default_factory=CoverStyle)
     boxes: dict[str, BoxDef] = field(default_factory=dict)
+    obsidian: dict = field(default_factory=dict)  # [obsidian] 설정 (obsidian.ObsidianSettings)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -286,6 +287,11 @@ def template_from_dict(data: dict) -> Template:
                        convert={"names": lambda v: tuple(v)})
     t.answers = _apply(t.answers, dict(data.pop("answers", {})), "answers", w)
     t.cover = _apply(t.cover, dict(data.pop("cover", {})), "cover", w)
+    t.obsidian = dict(data.pop("obsidian", {}))
+    if t.obsidian:
+        from .obsidian import ObsidianSettings
+
+        ObsidianSettings.from_dict(t.obsidian, w)  # 오타 경고만
 
     for name, spec in data.pop("box", {}).items():
         spec = dict(spec)
@@ -646,6 +652,41 @@ def build_textbook(
     """확장 Markdown 으로 교재를 만들고, output 이 있으면 저장한다."""
     tpl = template if isinstance(template, Template) else load_template(template)
     doc = Textbook(tpl).build(markdown, base_dir=base_dir, title=title)
+    if output is not None:
+        doc.save(output)
+    return doc
+
+
+def build_from_obsidian(
+    note: str | Path,
+    output: str | Path | None = None,
+    *,
+    vault: str | Path | None = None,
+    template: Template | str | Path | None = None,
+    title: str = "",
+) -> HwpxDocument:
+    """Obsidian 책 노트(또는 문제 노트 하나)로 교재를 만든다.
+
+    양식은 template 인자 → 책 노트 속성 'template' → 내장 '기본' 순서로 정한다.
+    """
+    from .obsidian import ObsidianSettings, expand_note, find_vault_root, parse_frontmatter
+
+    note = Path(note).resolve()
+    root = Path(vault).resolve() if vault else (find_vault_root(note) or note.parent)
+    meta, _ = parse_frontmatter(note.read_text(encoding="utf-8-sig"))
+    if not isinstance(template, Template):
+        name = template or meta.get("template")
+        if name and not isinstance(name, Path):
+            for base in (note.parent, root):  # 볼트 안 양식 파일
+                cand = base / str(name)
+                if cand.is_file():
+                    name = cand
+                    break
+        template = load_template(name)
+    settings = ObsidianSettings.from_dict(template.obsidian)
+    text, meta, warnings = expand_note(note, vault=root, box_names=set(template.boxes), settings=settings)
+    doc = Textbook(template).build(text, base_dir=note.parent, title=title or str(meta.get("title") or note.stem))
+    doc.warnings[:0] = warnings
     if output is not None:
         doc.save(output)
     return doc
