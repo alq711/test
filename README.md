@@ -55,6 +55,84 @@ md2hwpx 보고서.md --paper A4 --landscape --margin 20,20,15,20 --font 맑은\ 
 
 그림은 PNG, JPEG, GIF, BMP를 지원하며, 본문 너비보다 크면 자동으로 줄입니다.
 
+## 수학 교재 만들기 (양식 + 수식)
+
+```bash
+md2hwpx --init-template 내양식.toml          # 기본 수학 교재 양식을 복사 → 값만 고치면 내 양식
+md2hwpx 교재.md --template 내양식.toml       # 양식대로 변환
+md2hwpx 교재.md -t 기본                      # 내장 양식 그대로
+```
+
+예시: `examples/수학교재_예시.md` → `md2hwpx examples/수학교재_예시.md -t 기본`
+
+### 교재용 Markdown 문법
+
+````markdown
+# Ⅰ. 다항식                 ← 대단원: 새 쪽에서 시작, 문제 번호가 01부터 다시
+
+본문 안의 수식은 $x^2 + 1$ 처럼, 가운데 한 줄 수식은
+$$\frac{-b \pm \sqrt{b^2-4ac}}{2a}$$
+
+::: 정의 동류항              ← 양식의 [box."정의"] 모양 상자 (번호 자동: 정의 1, 정의 2 …)
+문자와 차수가 같은 항을 **동류항**이라 한다.
+:::
+
+::: 예제 곱셈 공식의 활용
+$x+y=5$, $xy=3$일 때 $x^2+y^2$의 값은?
+[풀이]                      ← 예제의 풀이는 상자 안에 바로 표시
+$(x+y)^2 - 2xy = 19$
+:::
+
+\columns{2}                 ← 여기부터 2단 (\columns{1} 로 되돌림, \columnbreak 로 다음 단)
+
+::: 문제 [3점]              ← 번호 자동 (01, 02 …), 뒤의 글은 문제 끝에 붙음
+$(2x+1)^2$을 전개한 식은?
+
+① $4x^2+1$ ② $4x^2+2x+1$ ③ $4x^2+4x+1$ ④ $2x^2+4x+1$ ⑤ $4x^2+4x+2$
+
+\vspace{20mm}               ← 빈 공간 (서술형 풀이 칸)
+
+[정답] ③
+[해설]                       ← [정답]·[해설]은 책 뒤 '정답과 해설'로 이동
+$(2x+1)^2 = 4x^2 + 4x + 1$
+:::
+
+\정답                        ← 여기까지의 정답과 해설을 이 자리에 (없으면 문서 맨 끝)
+````
+
+- **보기 ①~⑤**: 보기 길이를 보고 한 줄에 5개 / 3개 / 2개 / 1개씩 자동 정렬합니다.
+- **상자 종류(기본 양식)**: 정의, 정리, 공식, 예제, 증명, 참고, 주의. 양식 파일에 `[box."새이름"]`을 추가하면 `::: 새이름`으로 바로 쓸 수 있습니다.
+- **정답과 해설**: 빠른 정답표 + 문제별 해설(2단). 대단원 이름별로 묶입니다.
+
+### 양식 파일 (TOML)
+
+`--init-template`로 만든 파일에 모든 항목이 한글 설명과 함께 들어 있습니다. 주요 항목:
+
+| 구역 | 정하는 것 |
+|---|---|
+| `[page]` | 용지, 여백, 기본 단 수·간격·구분선 |
+| `[font]`, `[heading]` | 본문/제목 글꼴·크기·줄 간격·색 |
+| `[equation]` | 수식 글꼴(`HancomEQN`/`HYhwpEQ`)과 크기 |
+| `[header]`, `[footer]` | 머리말·꼬리말 (`{page}`, `{total}`) |
+| `[chapter]` | 대단원마다 새 쪽 |
+| `[problem]` | 번호 모양(`{n:02d}` → 01, `{chapter}-{n}` → 1-3), 색·크기, 들여쓰기, 풀이 공간 |
+| `[answers]` | '정답과 해설' 제목, 새 쪽, 단 수, 빠른 정답표 |
+| `[box."이름"]` | 상자 모양(`bar`/`inline`/`line`/`plain`), 테두리·배경·제목 띠 색, 번호 |
+
+항목 이름을 잘못 쓰면 변환할 때 `주의:` 로 알려 줍니다.
+
+### 지원하는 LaTeX
+
+`\frac` `\dfrac` `\sqrt` `\sqrt[n]` `^` `_` `\sum` `\int` `\iint` `\oint` `\lim` `\prod`,
+그리스 문자, `\le \ge \ne \pm \times \div \cdot \approx \equiv \to \Rightarrow \iff`,
+집합 `\in \subset \cup \cap \emptyset`, `\left( \right)`, `\overline \vec \hat \bar \dot`,
+`\text{한글}` `\mathrm`, `\therefore \because \angle \triangle \perp \parallel \infty`,
+행렬 `pmatrix bmatrix vmatrix matrix`, `cases`, `aligned`, `\binom` 등.
+모르는 명령은 글자로 넣고 `주의:` 메시지를 보여 줍니다.
+
+> 수식 상자 크기는 계산으로 추정한 값입니다. 한글(특히 Windows)은 저장된 크기로 줄을 배치하므로
+> 수식 앞뒤 간격이 어색하면 그 수식을 더블클릭했다가 닫으면 한글이 크기를 다시 맞춥니다.
+
 ## Python에서 직접 만들기
 
 ```python
@@ -91,13 +169,30 @@ from hwpxwriter import markdown_to_hwpx
 markdown_to_hwpx(open("보고서.md", encoding="utf-8").read(), "보고서.hwpx", page_number=True)
 ```
 
+교재 기능을 코드에서 쓰려면:
+
+```python
+from hwpxwriter.textbook import build_textbook, load_template
+build_textbook(open("교재.md", encoding="utf-8").read(), "교재.hwpx", template="내양식.toml")
+
+# 또는 직접: 수식·상자·다단·보기
+doc.add_equation(r"\int_0^1 x^2\,dx = \frac{1}{3}")
+with doc.box(label="정의 1", title="허수단위"):
+    doc.add_paragraph(["제곱하여 ", Run("-1", equation=True), "이 되는 수"])
+doc.set_columns(2, line=True)
+doc.add_choices(["$1$", "$2$", "$3$", "$4$", "$5$"])
+```
+
 ## 구조
 
 ```
 hwpxwriter/
-  document.py   문서 빌더 (문단·표·그림·머리말/꼬리말, .hwpx 패키징)
+  document.py   문서 빌더 (문단·표·그림·수식·상자·다단·머리말/꼬리말, .hwpx 패키징)
   styles.py     글자/문단 모양·테두리 관리, header.xml 생성
-  markdown.py   Markdown 해석기
+  markdown.py   Markdown 해석기 (+ 수식, ::: 블록, 지시어)
+  latex.py      LaTeX → 한글 수식 변환, 수식 크기 추정
+  textbook.py   교재: 양식 읽기, 문제 번호, 상자, 정답과 해설
+  templates/    내장 양식 (수학교재.toml)
   images.py     그림 형식·크기 읽기
   cli.py        md2hwpx 명령
 tests/          구조 검사 테스트 (pytest)
@@ -121,6 +216,6 @@ python -m pytest tests
 
 ## 아직 지원하지 않는 것
 
-- 표 칸 병합, 각주/미주, 하이퍼링크 필드(링크는 모양만 적용), 수식, 목차 자동 생성
+- 표 칸 병합, 각주/미주, 하이퍼링크 필드(링크는 모양만 적용), 목차 자동 생성, 수식 번호
 - 문단 중간의 그림 (한 줄 전체가 그림일 때만 그림으로 넣음)
 - 기존 hwpx 양식 파일 읽어서 채우기

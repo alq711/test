@@ -1,4 +1,4 @@
-"""Markdown → HwpxDocument 변환 (외부 라이브러리 없음).
+r"""Markdown → HwpxDocument 변환 (외부 라이브러리 없음).
 
 지원 문법
   블록:  # 제목(1~6), 문단, - * + 글머리표 / 1. 번호 목록(중첩, [ ] 체크박스),
@@ -6,6 +6,9 @@
          \\newpage · \\pagebreak · <!-- pagebreak -->(쪽 나눔), 줄 끝 공백 2칸/\\ (줄바꿈)
   글자:  **굵게**, *기울임*, ***굵게+기울임***, ~~취소선~~, `코드`, [링크](주소),
          <u>밑줄</u>, <sup>위첨자</sup>, <sub>아래첨자</sub>, ==형광펜==, <br>
+  수식:  $x^2$ (글 안), $$\int_0^1 f(x)dx$$ 또는 \[ ... \] (가운데 한 줄)
+  교재:  ::: 종류 제목 ... :::  (상자·문제 등 — handler 가 처리, 없으면 상자로)
+         ① ... ② ... (객관식 보기), \columns{2} (다단), \columnbreak, \vspace{20mm}
 """
 
 from __future__ import annotations
@@ -77,6 +80,15 @@ def parse_inline(text: str, base: Run | None = None, link_color: str = "#0563C1"
             buf.append(text[i + 1])
             i += 2
             continue
+
+        # $수식$ / $$수식$$
+        if ch == "$":
+            m = re.match(r"\$\$(.+?)\$\$", text[i:], re.S) or re.match(r"\$(?=\S)((?:\\.|[^$\\])+?)(?<=\S)\$(?!\d)", text[i:], re.S)
+            if m:
+                emit_text()
+                out.append(replace(base, text=m.group(1).strip(), equation=True))
+                i += m.end()
+                continue
 
         # `코드`
         if ch == "`":
@@ -187,6 +199,11 @@ def _find_closing(text: str, start: int, delim: str) -> int:
         if c == "\\":
             i += 2
             continue
+        if c == "$":
+            m = re.match(r"\$\$.+?\$\$|\$[^$]+\$", text[i:], re.S)
+            if m:
+                i += m.end()
+                continue
         if c == "`":
             ticks = re.match(r"`+", text[i:]).group(0)
             end = text.find(ticks, i + len(ticks))
@@ -267,6 +284,15 @@ def _image_attrs(spec: str | None) -> dict[str, float]:
     return {"width_ratio": value} if value <= 1 else {"width": value}
 
 
+_CONTAINER_OPEN = re.compile(r"^ {0,3}(:{3,})\s*([^\s:{][^\s{]*)?\s*(.*?)\s*$")
+_CONTAINER_CLOSE = re.compile(r"^ {0,3}(:{3,})\s*$")
+_DIRECTIVE = re.compile(r"^\s*\\(\w+)\*?(?:\{([^}]*)\}|[ \t]+(\S.*?))?\s*$")
+_DISPLAY_OPEN = re.compile(r"^\s*(\$\$|\\\[)(.*)$")
+_CHOICE_MARKS = "①②③④⑤⑥⑦⑧⑨⑩"
+_CHOICE_START = re.compile(rf"^\s*[{_CHOICE_MARKS}]")
+_KNOWN_DIRECTIVES = {"columns", "columnbreak", "vspace", "newpage", "pagebreak", "clearpage"}
+
+
 def _starts_block(line: str, next_line: str | None) -> bool:
     return bool(
         _HEADING.match(line)
@@ -276,6 +302,10 @@ def _starts_block(line: str, next_line: str | None) -> bool:
         or _QUOTE.match(line)
         or _PAGEBREAK.match(line)
         or _IMAGE_BLOCK.match(line)
+        or _CONTAINER_OPEN.match(line)
+        or _DISPLAY_OPEN.match(line)
+        or _CHOICE_START.match(line)
+        or (_DIRECTIVE.match(line) and not line.lstrip().startswith("\\["))
         or ("|" in line and next_line is not None and _TABLE_SEP.match(next_line) and "-" in next_line)
     )
 
@@ -288,9 +318,59 @@ def _strip_front_matter(lines: list[str]) -> list[str]:
     return lines
 
 
-def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path) -> None:
+def split_choices(text: str) -> list[str]:
+    """'① 1 ② 2 ③ 3' → ['1', '2', '3']"""
+    parts = re.split(rf"[{_CHOICE_MARKS}]", text)
+    return [p.strip() for p in parts[1:]]
+
+
+def collect_container(lines: list[str], i: int) -> tuple[str, str, list[str], int]:
+    """lines[i] 가 ':::' 여는 줄일 때 (종류, 제목, 본문 줄들, 다음 줄 번호)."""
+    m = _CONTAINER_OPEN.match(lines[i])
+    kind, title = (m.group(2) or "").strip(), (m.group(3) or "").strip()
+    depth, body = 1, []
+    i += 1
+    while i < len(lines):
+        line = lines[i]
+        if _CONTAINER_CLOSE.match(line):
+            depth -= 1
+            if depth == 0:
+                return kind, title, body, i + 1
+        elif _CONTAINER_OPEN.match(line) and _CONTAINER_OPEN.match(line).group(2):
+            depth += 1
+        body.append(line)
+        i += 1
+    return kind, title, body, i
+
+
+def _mm(value: str) -> float:
+    m = re.match(r"\s*([\d.]+)\s*(mm|cm|pt)?", value or "")
+    if not m:
+        return 10.0
+    v = float(m.group(1))
+    return v * 10 if m.group(2) == "cm" else v * 0.3528 if m.group(2) == "pt" else v
+
+
+class MarkdownHandler:
+    """render_markdown 의 확장 지점. 교재 모듈(textbook.py)이 이걸 이어받아 문제·상자를 처리한다."""
+
+    def heading(self, doc, level: int, raw: str, inline) -> bool:
+        return False
+
+    def container(self, doc, kind: str, title: str, lines: list[str], base_dir: Path, inline) -> bool:
+        return False
+
+    def directive(self, doc, name: str, arg: str) -> bool:
+        return False
+
+    def paragraph(self, doc, raw: str, inline) -> bool:
+        return False
+
+
+def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path, handler: MarkdownHandler | None = None) -> None:
     lines = _strip_front_matter(text.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
     link_color = doc.theme.link_color
+    handler = handler or MarkdownHandler()
 
     def inline(s: str, **base: object) -> list[Run]:
         return parse_inline(s, Run("", **base), link_color)
@@ -309,6 +389,69 @@ def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path) -> None:
             i += 1
             continue
 
+        # ::: 상자/문제
+        if _CONTAINER_OPEN.match(line) and not _CONTAINER_CLOSE.match(line):
+            kind, title, body, i = collect_container(lines, i)
+            if not handler.container(doc, kind, title, body, base_dir, inline):
+                with doc.box(label=kind or None, title=inline(title) if title else None):
+                    render_markdown(doc, "\n".join(body), base_dir=base_dir, handler=handler)
+            continue
+        if _CONTAINER_CLOSE.match(line):  # 짝 없는 닫는 줄
+            i += 1
+            continue
+
+        # \columns{2} 같은 지시어
+        m = _DIRECTIVE.match(line)
+        if m and not line.lstrip().startswith("\\["):
+            name, arg = m.group(1), (m.group(2) if m.group(2) is not None else m.group(3) or "")
+            if handler.directive(doc, name, arg):
+                i += 1
+                continue
+            if name == "columns":
+                if doc.at_top_level:
+                    nums = re.findall(r"[\d.]+", arg)
+                    count = int(float(nums[0])) if nums else 1
+                    gap = float(nums[1]) if len(nums) > 1 else 8.0
+                    doc.set_columns(count, gap=gap, line="line" in arg or "선" in arg)
+                i += 1
+                continue
+            if name == "columnbreak":
+                doc.add_column_break()
+                i += 1
+                continue
+            if name in ("newpage", "pagebreak", "clearpage"):
+                doc.add_page_break()
+                i += 1
+                continue
+            if name == "vspace":
+                doc.add_spacer(_mm(arg))
+                i += 1
+                continue
+            # 모르는 지시어는 글로 둔다
+
+        # $$ 수식 $$  /  \[ 수식 \]
+        m = _DISPLAY_OPEN.match(line)
+        if m:
+            opener = m.group(1)
+            closer = "$$" if opener == "$$" else "\\]"
+            rest = m.group(2)
+            if closer in rest:
+                body_text, after = rest.split(closer, 1)
+                i += 1
+            else:
+                parts = [rest]
+                i += 1
+                while i < n and closer not in lines[i]:
+                    parts.append(lines[i])
+                    i += 1
+                if i < n:
+                    parts.append(lines[i].split(closer, 1)[0])
+                    i += 1
+                body_text = "\n".join(parts)
+            if body_text.strip():
+                doc.add_equation(body_text.strip())
+            continue
+
         # 코드 블록
         m = _FENCE.match(line)
         if m:
@@ -324,7 +467,9 @@ def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path) -> None:
 
         m = _HEADING.match(line)
         if m:
-            doc.add_heading(inline((m.group(2) or "").strip()), level=len(m.group(1)))
+            raw = (m.group(2) or "").strip()
+            if not handler.heading(doc, len(m.group(1)), raw, inline):
+                doc.add_heading(inline(raw), level=len(m.group(1)))
             i += 1
             continue
 
@@ -369,6 +514,16 @@ def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path) -> None:
             i = _render_list(doc, lines, i, inline)
             continue
 
+        # 객관식 보기 ① ② ③ ...
+        if _CHOICE_START.match(line):
+            buf = [line.strip()]
+            i += 1
+            while i < n and lines[i].strip() and (_CHOICE_START.match(lines[i]) or not _starts_block(lines[i], None)):
+                buf.append(lines[i].strip())
+                i += 1
+            doc.add_choices([inline(c) for c in split_choices(" ".join(buf))])
+            continue
+
         # 문단 (+ setext 제목)
         para = [line]
         i += 1
@@ -385,7 +540,9 @@ def render_markdown(doc: "HwpxDocument", text: str, *, base_dir: Path) -> None:
             i += 1
         if para:
             # 줄 끝 공백 2칸(강제 줄바꿈 표시)은 남겨야 하므로 왼쪽만 다듬는다
-            doc.add_paragraph(inline("\n".join(s.lstrip() for s in para).rstrip()))
+            raw = "\n".join(s.lstrip() for s in para).rstrip()
+            if not handler.paragraph(doc, raw, inline):
+                doc.add_paragraph(inline(raw))
 
 
 def _add_image(doc, base_dir: Path, src: str, alt: str, title: str | None, attrs: dict, inline) -> None:

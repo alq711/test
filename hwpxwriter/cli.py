@@ -27,10 +27,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="Markdown/텍스트 파일을 한글 문서(.hwpx)로 변환합니다.",
         epilog="예) md2hwpx 보고서.md --page-number --header '2026년 업무 보고'",
     )
-    p.add_argument("inputs", nargs="+", help="입력 파일 (.md / .txt). '-' 는 표준입력")
+    p.add_argument("inputs", nargs="*", help="입력 파일 (.md / .txt). '-' 는 표준입력")
     p.add_argument("-o", "--output", help="출력 파일 또는 폴더 (기본: 입력과 같은 이름 .hwpx)")
     p.add_argument("--text", action="store_true", help="Markdown 해석 없이 일반 텍스트로 처리 (.txt 는 자동)")
     p.add_argument("--title", default="", help="문서 정보의 제목")
+
+    g = p.add_argument_group("교재 양식")
+    g.add_argument("-t", "--template", metavar="양식.toml",
+                   help="교재 양식 파일로 변환 (문제·상자·정답과 해설). '기본' 이면 내장 수학 교재 양식")
+    g.add_argument("--init-template", metavar="경로.toml", help="고쳐 쓸 수 있는 기본 양식 파일을 만들고 끝냄")
 
     g = p.add_argument_group("머리말·꼬리말")
     g.add_argument("--header", help="머리말 글자 ({page}=쪽 번호, {total}=전체 쪽 수)")
@@ -66,7 +71,24 @@ def _page_setup(args: argparse.Namespace) -> PageSetup:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.init_template:
+        from .textbook import write_default_template
+
+        print(f"양식 파일을 만들었습니다: {write_default_template(args.init_template)}")
+        return 0
+    if not args.inputs:
+        parser.error("입력 파일을 적어 주세요")
+    template = None
+    if args.template:
+        from .textbook import load_template
+
+        try:
+            template = load_template(None if args.template in ("기본", "default", "math") else args.template)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"오류: 양식을 읽지 못했습니다 — {exc}", file=sys.stderr)
+            return 2
     theme = Theme(
         body_font=args.font,
         heading_font=args.heading_font,
@@ -113,11 +135,27 @@ def main(argv: list[str] | None = None) -> int:
                 footer=args.footer,
                 page_number=args.page_number,
             )
-            if args.text or src_path.suffix.lower() == ".txt":
+            if template is not None and not args.text:
+                from .textbook import Textbook
+
+                tpl = template
+                if args.header or args.footer or args.page_number:
+                    from dataclasses import replace as _replace
+
+                    tpl = _replace(
+                        tpl,
+                        header=(args.header, "right") if args.header else tpl.header,
+                        footer=(args.footer, "center") if args.footer
+                        else ("- {page} -", "center") if args.page_number else tpl.footer,
+                    )
+                doc = Textbook(tpl).build(source, base_dir=base_dir, title=args.title or src_path.stem)
+            elif args.text or src_path.suffix.lower() == ".txt":
                 doc = text_to_hwpx(source, **common)
             else:
                 doc = markdown_to_hwpx(source, base_dir=base_dir, **common)
             saved = doc.save(target)
+            for warning in dict.fromkeys(doc.warnings):
+                print(f"  주의: {warning}", file=sys.stderr)
             print(f"저장: {saved}")
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             print(f"오류 ({name}): {exc}", file=sys.stderr)

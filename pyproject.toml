@@ -9,7 +9,7 @@ description = "Markdown/텍스트를 한글(HWPX) 문서로 변환하는 라이�
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-dependencies = []
+dependencies = ["tomli; python_version < '3.11'"]
 
 [project.optional-dependencies]
 test = ["pytest"]
@@ -19,3 +19,6 @@ md2hwpx = "hwpxwriter.cli:main"
 
 [tool.setuptools]
 packages = ["hwpxwriter"]
+
+[tool.setuptools.package-data]
+hwpxwriter = ["templates/*.toml"]
