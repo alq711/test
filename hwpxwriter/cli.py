@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("교재 양식")
     g.add_argument("-t", "--template", metavar="양식.toml",
-                   help="교재 양식 파일로 변환 (문제·상자·정답과 해설). 내장 양식: 기본(=수학교재), 문제집")
+                   help="교재 양식 파일로 변환 (문제·상자·정답과 해설). 내장 양식: 기본(=수학교재), 문제집, 개념서")
     g.add_argument("--vault", metavar="볼트 폴더",
                    help="Obsidian 볼트 폴더 (![[노트]] 와 그림을 찾을 곳). 노트가 볼트 안에 있으면 자동으로 찾음")
     g.add_argument("--init-template", metavar="경로.toml",

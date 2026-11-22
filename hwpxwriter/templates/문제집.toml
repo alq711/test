@@ -186,3 +186,9 @@ label_color = "#1F3864"
 border_width = "0.12 mm"
 solution_label = "풀이"
 solution_color = "#1F3864"
+
+[box."조건"]                  # (가) (나) 조건 상자
+kind = "plain"
+border_color = "#000000"
+border_width = "0.12 mm"
+padding = 2.5

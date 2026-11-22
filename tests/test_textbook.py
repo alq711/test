@@ -457,3 +457,13 @@ def test_workbook_template_old_name_and_title_header(tmp_path):
     texts = ["".join(t.text or "" for t in h.iter(HP + "t")) for h in sec.iter(HP + "header")]
     assert any("내 문제집 | 미적분" in t for t in texts)
     assert not any("{title}" in t for t in texts)
+
+
+def test_concept_book_template_builds_example(tmp_path):
+    t = load_template("개념서")
+    assert t.warnings == []
+    assert {"정의", "정리", "공식", "예제", "증명", "주의", "보기", "조건"} <= set(t.boxes)
+    example = Path(__file__).resolve().parent.parent / "examples" / "개념서_예시.md"
+    doc = build_textbook(example.read_text(encoding="utf-8"), tmp_path / "c.hwpx", template="개념서")
+    assert doc.warnings == []
+    validate((tmp_path / "c.hwpx").read_bytes())
