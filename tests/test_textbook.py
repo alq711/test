@@ -398,7 +398,7 @@ def test_font_ratio_and_spacing_from_template(tmp_path):
     head, _ = _header_and_section(out.read_bytes())
     HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
     fonts = [f.get("face") for f in head.find(f".//{HH}fontface").findall(HH + "font")]
-    batang = str(fonts.index("함초롬바탕"))
+    batang = str(fonts.index("신명 중명조"))
     ratios = {cp.find(HH + "fontRef").get("hangul"): cp.find(HH + "ratio").get("hangul") for cp in head.iter(HH + "charPr")}
     assert ratios[batang] == "95"
 
