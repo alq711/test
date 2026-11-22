@@ -22,7 +22,7 @@ from test_hwpx import HP, validate
 VAULT = Path(__file__).resolve().parent.parent / "examples" / "obsidian_vault"
 BOOK = VAULT / "교재" / "수능 파이널 (예시).md"
 NOTE30 = VAULT / "20_Teaching_Materials" / "마더텅 수능기출" / "2025 9월모평" / "2025 9월모평 수학 30번 (기하).md"
-BOXES = set(load_template("수능파이널").boxes)
+BOXES = set(load_template("문제집").boxes)
 
 
 def builder() -> BookBuilder:
@@ -125,7 +125,7 @@ def test_build_book_end_to_end(tmp_path: Path):
 
 def test_single_problem_note_and_cli(tmp_path: Path):
     out = tmp_path / "30.hwpx"
-    assert cli_main([str(NOTE30), "-t", "수능파이널", "-o", str(out)]) == 0
+    assert cli_main([str(NOTE30), "-t", "문제집", "-o", str(out)]) == 0
     validate(out.read_bytes())
     out2 = tmp_path / "book.hwpx"
     assert cli_main([str(BOOK), "--vault", str(VAULT), "-o", str(out2)]) == 0

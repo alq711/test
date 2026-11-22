@@ -49,7 +49,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 TEMPLATE_DIR = Path(__file__).with_name("templates")
 BUILTIN_TEMPLATE = TEMPLATE_DIR / "수학교재.toml"
-_BUILTIN_ALIASES = {"기본": "수학교재", "default": "수학교재", "math": "수학교재", "suneung": "수능파이널"}
+_BUILTIN_ALIASES = {"기본": "수학교재", "default": "수학교재", "math": "수학교재", "suneung": "문제집", "수능파이널": "문제집", "workbook": "문제집"}
 
 _PROBLEM_NAMES = {"문제", "problem", "연습문제", "연습", "exercise"}
 _COVER_NAMES = {"표지", "cover"}
@@ -190,7 +190,7 @@ def _apply(obj: Any, data: dict, where: str, warnings: list[str], rename: dict[s
 
 
 def resolve_template_path(path: str | Path | None) -> Path:
-    """양식 경로. 내장 양식 이름(기본, 수학교재, 수능파이널)도 받는다."""
+    """양식 경로. 내장 양식 이름(기본, 수학교재, 문제집)도 받는다. 예전 이름 수능파이널 = 문제집."""
     if path is None:
         return BUILTIN_TEMPLATE
     p = Path(path)
@@ -380,9 +380,10 @@ class Textbook(MarkdownHandler):
         t = self.t
         doc = HwpxDocument(t.page, t.theme, title=title or t.title)
         doc.warnings.extend(t.warnings)
+        self.book_title = title or t.title
         if t.header:
             self._header_right = t.header.right
-            doc.set_header(t.header.left, **t.header.kwargs(self._right_text(t.header.right)))
+            doc.set_header(self._left_text(), **t.header.kwargs(self._right_text(t.header.right)))
         if t.footer:
             doc.set_footer(t.footer.left, **t.footer.kwargs(t.footer.right))
         if t.columns > 1:
@@ -400,6 +401,11 @@ class Textbook(MarkdownHandler):
     def _inline(self, doc: HwpxDocument, text: str, **base: object) -> list[Run]:
         return parse_inline(text, Run("", **base), doc.theme.link_color)
 
+    def _left_text(self) -> str:
+        """머리말 왼쪽 글. {title} 은 책 이름(표지 제목 | 부제, 또는 문서 제목)으로 바뀐다."""
+        left = self.t.header.left if self.t.header else ""
+        return left.replace("{title}", getattr(self, "book_title", "") or "").strip(" |")
+
     def _right_text(self, right: str | None) -> str | None:
         if right is None:
             return None
@@ -408,7 +414,7 @@ class Textbook(MarkdownHandler):
     def _change_header(self, doc: HwpxDocument, right: str | None) -> None:
         if self.t.header is None:
             return
-        doc.change_header(self.t.header.left, **self.t.header.kwargs(self._right_text(right)))
+        doc.change_header(self._left_text(), **self.t.header.kwargs(self._right_text(right)))
 
     def _restore_columns(self, doc: HwpxDocument) -> None:
         if doc.at_top_level and doc._columns[0] != max(self.t.columns, 1):
@@ -474,6 +480,13 @@ class Textbook(MarkdownHandler):
                 info[key if key == "desc" else "desc"].append(line.strip())
         if not doc._paragraphs:
             doc.hide_first_page = True
+        if info["title"] and self.t.header and "{title}" in self.t.header.left:
+            # 머리말 왼쪽 '{title}' = 표지 제목 | 부제(작은 글씨 부분 빼고)
+            name = re.sub(r"[*_`$]", "", info["title"][0])
+            if info["subtitle"]:
+                name += " | " + re.sub(r"[*_`$]", "", info["subtitle"][0].partition(" | ")[0])
+            self.book_title = name
+            self._change_header(doc, self._header_right)
         if c.band_color:
             doc.add_page_band(c.band_color, c.band_height)
         doc.add_spacer(c.top_space)

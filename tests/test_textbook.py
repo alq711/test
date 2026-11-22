@@ -248,7 +248,7 @@ SUNEUNG = Path(__file__).resolve().parent.parent / "examples" / "수능파이널
 
 
 def test_suneung_template_loads_without_warnings():
-    t = load_template("수능파이널")
+    t = load_template("문제집")
     assert not t.warnings
     assert t.problem.layout == "header" and t.problem.columns == 2
     assert t.boxes["보기"].style.kind == "titled" and t.boxes["주의"].style.kind == "tag"
@@ -258,7 +258,7 @@ def test_suneung_template_loads_without_warnings():
 def test_suneung_example_structure(tmp_path: Path):
     from test_hwpx import HC, HH
 
-    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), tmp_path / "s.hwpx", template="수능파이널",
+    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), tmp_path / "s.hwpx", template="문제집",
                          base_dir=SUNEUNG.parent)
     assert doc.warnings == []
     trees = validate((tmp_path / "s.hwpx").read_bytes())
@@ -325,7 +325,7 @@ def test_header_split_and_change_mid_document():
 
 def test_cli_init_from_builtin(tmp_path: Path):
     out = tmp_path / "내양식.toml"
-    assert cli_main(["--init-template", str(out), "-t", "수능파이널"]) == 0
+    assert cli_main(["--init-template", str(out), "-t", "문제집"]) == 0
     assert 'layout = "header"' in out.read_text(encoding="utf-8")
     assert not load_template(out).warnings
 
@@ -338,7 +338,7 @@ def test_ruled_and_shaded_paragraphs_do_not_bleed():
     """
     from test_hwpx import HH
 
-    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), template="수능파이널", base_dir=SUNEUNG.parent)
+    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), template="문제집", base_dir=SUNEUNG.parent)
     trees = validate(doc.to_bytes())
     head, sec = trees["Contents/header.xml"], trees["Contents/section0.xml"]
     plain_bf = {bf.get("id") for bf in head.iter(HH + "borderFill")
@@ -394,7 +394,7 @@ def test_font_ratio_and_spacing_from_template(tmp_path):
     assert t.theme.font_ratio == {"함초롬바탕": 95}
     assert t.theme.font_spacing == {"함초롬돋움": -3}
     out = tmp_path / "r.hwpx"
-    build_textbook("::: 문제\n본문\n:::\n", out, template="수능파이널")
+    build_textbook("::: 문제\n본문\n:::\n", out, template="문제집")
     head, _ = _header_and_section(out.read_bytes())
     HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
     fonts = [f.get("face") for f in head.find(f".//{HH}fontface").findall(HH + "font")]
@@ -443,7 +443,17 @@ def test_bogi_label_sits_on_box_border():
 
 def test_cover_author_fixed_position(tmp_path):
     out = tmp_path / "c.hwpx"
-    build_textbook("::: 표지\n제목: 책\n설명:\n" + "긴 설명\n" * 40 + "저자: 이름\n:::\n", out, template="수능파이널")
+    build_textbook("::: 표지\n제목: 책\n설명:\n" + "긴 설명\n" * 40 + "저자: 이름\n:::\n", out, template="문제집")
     _, sec = _header_and_section(out.read_bytes())
     pos = [t.find(HP + "pos") for t in sec.iter(HP + "tbl")]
     assert any(p.get("vertRelTo") == "PAPER" and int(p.get("vertOffset")) > 0 for p in pos)
+
+
+def test_workbook_template_old_name_and_title_header(tmp_path):
+    assert load_template("수능파이널").header.left == load_template("문제집").header.left == "{title}"
+    out = tmp_path / "t.hwpx"
+    build_textbook("::: 표지\n제목: 내 문제집\n부제: 미적분 | 4점\n:::\n\n# 01 극한\n\n본문\n", out, template="문제집")
+    _, sec = _header_and_section(out.read_bytes())
+    texts = ["".join(t.text or "" for t in h.iter(HP + "t")) for h in sec.iter(HP + "header")]
+    assert any("내 문제집 | 미적분" in t for t in texts)
+    assert not any("{title}" in t for t in texts)
