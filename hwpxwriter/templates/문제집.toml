@@ -130,6 +130,7 @@ line_spacing = 182
 display_align = "left"        # 문제 안 수식 줄은 왼쪽, 살짝 들여씀
 display_indent = 4
 columns = 2                   # 문제가 나오면 2단으로
+new_page = false              # true 로 바꾸면 '## 최근 기출' 같은 문제 구역이 새 쪽에서 시작
 column_line = true
 
 [answers]

@@ -88,6 +88,10 @@ class ProblemStyle:
     columns: int = 0  # 문제가 나오면 자동으로 바꿀 단 수 (0 = 그대로)
     column_line: bool = True
     names: tuple[str, ...] = tuple(sorted(_PROBLEM_NAMES))
+    # 문제 구역: 이 제목으로 시작하는 '## ' 제목부터 다음 '## ' 제목까지
+    section_titles: tuple[str, ...] = ("확인 문제", "연습 문제", "기출 문제", "최근 기출", "실전 문제", "유형 문제")
+    new_page: bool = False  # 문제 구역을 새 쪽에서 시작 (개념 쪽과 문제 쪽을 나눔). 개념으로 돌아갈 때도 새 쪽
+    section_header: str | None = None  # 문제 구역 머리말 오른쪽 글. {chapter}=단원, {section}=구역 제목
 
 
 @dataclass
@@ -290,7 +294,7 @@ def template_from_dict(data: dict) -> Template:
         w.append(f"양식 [chapter] 의 '{k}' 는 알 수 없는 항목이라 무시했습니다")
 
     t.problem = _apply(t.problem, dict(data.pop("problem", {})), "problem", w,
-                       convert={"names": lambda v: tuple(v)})
+                       convert={"names": lambda v: tuple(v), "section_titles": lambda v: tuple(v)})
     t.answers = _apply(t.answers, dict(data.pop("answers", {})), "answers", w)
     t.cover = _apply(t.cover, dict(data.pop("cover", {})), "cover", w)
     t.obsidian = dict(data.pop("obsidian", {}))
@@ -424,9 +428,13 @@ class Textbook(MarkdownHandler):
     def heading(self, doc: HwpxDocument, level: int, raw: str, inline) -> bool:
         if not doc.at_top_level:
             return False
+        if level == 2:
+            self._problem_section(doc, raw)
         if level <= 2:
             self._restore_columns(doc)
         if level == 1:
+            self._in_problem_section = False
+            self._fresh_chapter = True
             number, title, _ = split_heading(raw, True)
             if self.t.chapter_new_page and doc._paragraphs:
                 doc.add_page_break()
@@ -441,6 +449,27 @@ class Textbook(MarkdownHandler):
             if self.t.header and self.t.header.right and "{chapter}" in self.t.header.right:
                 self._change_header(doc, self.t.header.right)
         return False
+
+    def _problem_section(self, doc: HwpxDocument, raw: str) -> None:
+        """'## 확인 문제' 같은 문제 구역의 시작·끝: 새 쪽, 머리말 바꾸기."""
+        p = self.t.problem
+        _, title, _ = split_heading(raw, False)
+        title = re.sub(r"[*_`$]", "", title).strip()
+        is_problem = any(title.startswith(name) for name in p.section_titles)
+        fresh = getattr(self, "_fresh_chapter", False)
+        self._fresh_chapter = False
+        was = getattr(self, "_in_problem_section", False)
+        if is_problem == was:
+            return
+        self._in_problem_section = is_problem
+        if p.new_page and doc._paragraphs and not fresh:
+            doc.add_page_break()
+        if p.section_header and self.t.header and self.t.header.right is not None:
+            if is_problem:
+                section = title.partition(" | ")[0].strip()
+                self._change_header(doc, p.section_header.replace("{section}", section))
+            else:
+                self._change_header(doc, self._header_right)
 
     def directive(self, doc: HwpxDocument, name: str, arg: str) -> bool:
         key = name.lower()

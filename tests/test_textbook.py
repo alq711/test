@@ -467,3 +467,18 @@ def test_concept_book_template_builds_example(tmp_path):
     doc = build_textbook(example.read_text(encoding="utf-8"), tmp_path / "c.hwpx", template="개념서")
     assert doc.warnings == []
     validate((tmp_path / "c.hwpx").read_bytes())
+
+
+def test_problem_section_starts_new_page(tmp_path):
+    md = ("# 01 포물선\n\n## 1. 정의\n\n개념 설명\n\n## 확인 문제\n\n::: 문제\n문제 하나\n[정답] 1\n:::\n\n"
+          "## 2. 접선\n\n다음 개념\n")
+    out = tmp_path / "p.hwpx"
+    build_textbook(md, out, template="개념서")
+    _, sec = _header_and_section(out.read_bytes())
+    breaks = [("".join(t.text or "" for t in p.iter(HP + "t")), p.get("pageBreak")) for p in sec.findall(HP + "p")]
+    starts = {text for text, pb in breaks if pb == "1"}
+    assert any("확인 문제" in t for t in starts)       # 문제 구역 앞에서 새 쪽
+    assert any("접선" in t for t in starts)            # 개념으로 돌아갈 때도 새 쪽
+    assert not any("정의" in t and "1." in t for t in starts)  # 단원 첫 개념은 단원 제목과 같은 쪽
+    headers = ["".join(t.text or "" for t in h.iter(HP + "t")) for h in sec.iter(HP + "header")]
+    assert any("포물선  ·  확인 문제" in h for h in headers)
