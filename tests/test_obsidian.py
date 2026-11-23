@@ -150,3 +150,50 @@ def test_single_problem_note_and_cli(tmp_path: Path):
     out2 = tmp_path / "book.hwpx"
     assert cli_main([str(BOOK), "--vault", str(VAULT), "-o", str(out2)]) == 0
     validate(out2.read_bytes())
+
+
+def _mini_vault(tmp_path: Path) -> Path:
+    v = tmp_path / "v"
+    (v / ".obsidian").mkdir(parents=True)
+    (v / "문제").mkdir()
+    (v / "교재" / "양식").mkdir(parents=True)
+    (v / "문제" / "포물선 1.md").write_text(
+        "---\ntype: problem-bank\nsubject: 기하/이차곡선/포물선\nanswer: \"3\"\npoints: 3\n---\n"
+        "# 포물선 1\n\n포물선 $y^2=4x$의 초점의 $x$좌표는?\n\n> **[보기]**\n>\n> ㄱ. 참\n\n"
+        "> [!bogi] 보기\n> ㄴ. 거짓\n\n① 1　② 2　③ 3　④ 4　⑤ 5\n", encoding="utf-8")
+    (v / "문제" / "타원 1.md").write_text(
+        "---\ntype: problem-bank\nsubject: 기하/타원\n---\n타원 문제 (4점)\n", encoding="utf-8")
+    (v / "교재" / "단원 목록.md").write_text("---\ntype: note\n---\n- 기하/이차곡선/포물선\n- 기하/이차곡선/타원\n",
+                                            encoding="utf-8")
+    shutil.copy(Path(__file__).resolve().parent.parent / "hwpxwriter" / "templates" / "문제집.toml",
+                v / "교재" / "양식" / "내 문제집.toml")
+    (v / "교재" / "책.md").write_text(
+        "---\ntype: book\ntemplate: 내 문제집\noutput: 출력/\n---\n# 01 포물선\n\\문제모음 subject=기하/이차곡선/포물선\n"
+        "# 02 없음\n\\문제모음 subject=기하/없음\n", encoding="utf-8")
+    return v
+
+
+def test_points_property_and_bogi_boxes(tmp_path: Path):
+    v = _mini_vault(tmp_path)
+    b = BookBuilder(Vault(v), box_names=BOXES)
+    text = "\n".join(b.problem_block(b.vault.read(v / "문제" / "포물선 1.md")))
+    assert "좌표는? [3점]" in text  # 속성 points → 발문 끝
+    assert text.count("::: 보기") == 2 and "[보기]**" not in text and "[!bogi]" not in text
+    assert "[정답] ③" in text
+
+
+def test_vault_template_output_property_and_check(tmp_path: Path, capsys):
+    v = _mini_vault(tmp_path)
+    book = v / "교재" / "책.md"
+    assert cli_main([str(book)]) == 0
+    assert (v / "교재" / "출력" / "책.hwpx").is_file()  # output: 출력/
+    from hwpxwriter.textbook import find_vault_template
+
+    assert find_vault_template("내 문제집", book, v) == v / "교재" / "양식" / "내 문제집.toml"
+    assert find_vault_template("문제집", book, v) is None  # 볼트에 없으면 내장 양식
+    capsys.readouterr()
+    assert cli_main(["--check", str(v)]) == 1
+    out = capsys.readouterr().out
+    assert "문제/타원 1.md" in out and "정답 없음" in out and "단원 목록에 없는 단원: 기하/타원" in out
+    assert "배점" not in out  # (4점) 이 본문에 있음
+    assert "교재/책.md" in out and "기하/없음" in out

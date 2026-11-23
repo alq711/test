@@ -38,6 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="교재 양식 파일로 변환 (문제·상자·정답과 해설). 내장 양식: 기본(=수학교재), 문제집, 개념서")
     g.add_argument("--vault", metavar="볼트 폴더",
                    help="Obsidian 볼트 폴더 (![[노트]] 와 그림을 찾을 곳). 노트가 볼트 안에 있으면 자동으로 찾음")
+    g.add_argument("--check", metavar="볼트 폴더",
+                   help="볼트의 문제 노트(정답·배점·단원·그림)와 책 노트(문제모음·삽입)를 점검하고 끝냄")
     g.add_argument("--init-template", metavar="경로.toml",
                    help="고쳐 쓸 수 있는 양식 파일을 만들고 끝냄 (--template 으로 바탕 양식 선택)")
 
@@ -80,6 +82,41 @@ def _in_vault(path: Path) -> bool:
     return find_vault_root(path) is not None
 
 
+def _output_from_note(src_path: Path, source: str) -> Path | None:
+    """책 노트 속성 output: '출력/기하.hwpx' 또는 '출력/' (폴더) → 노트 기준 경로."""
+    if src_path.suffix.lower() != ".md":
+        return None
+    from .obsidian import parse_frontmatter
+
+    value = parse_frontmatter(source)[0].get("output")
+    if not value or not isinstance(value, str):
+        return None
+    out = src_path.resolve().parent / value
+    if value.endswith(("/", "\\")) or out.is_dir():
+        out = out / (src_path.stem + ".hwpx")
+    elif out.suffix.lower() != ".hwpx":
+        out = out.with_name(out.name + ".hwpx")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _check(folder: str, template_name: str | None) -> int:
+    from .obsidian import ObsidianSettings, check_vault, find_vault_root
+    from .textbook import load_template
+
+    root = find_vault_root(Path(folder) / ".") or Path(folder)
+    tpl = load_template(template_name or "문제집")
+    issues = check_vault(root, settings=ObsidianSettings.from_dict(tpl.obsidian), box_names=set(tpl.boxes))
+    if not issues:
+        print(f"점검: {root} — 문제 없음")
+        return 0
+    width = max(len(p) for p, _ in issues)
+    for path, what in issues:
+        print(f"{path.ljust(width)}  {what}")
+    print(f"점검: {len(issues)}건 ({len({p for p, _ in issues})}개 노트)")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -93,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"양식 파일을 만들었습니다: {made}")
         return 0
+    if args.check:
+        return _check(args.check, args.template)
     if not args.inputs:
         parser.error("입력 파일을 적어 주세요")
     template = None
@@ -140,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
             elif args.output:
                 target = Path(args.output)
             else:
-                target = src_path.with_suffix(".hwpx")
+                target = _output_from_note(src_path, source) or src_path.with_suffix(".hwpx")
 
             common = dict(
                 page=page,

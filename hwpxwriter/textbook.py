@@ -711,6 +711,21 @@ def build_textbook(
     return doc
 
 
+def find_vault_template(name: str, note: Path, root: Path) -> Path | None:
+    """볼트 안 양식 파일: 책 노트 옆 → 볼트 맨 위 → 볼트 어디든 '<이름>.toml' (가까운 것 먼저)."""
+    from .obsidian import Vault
+
+    names = [name] if name.lower().endswith(".toml") else [name, name + ".toml"]
+    for base in (note.parent, root):
+        for n in names:
+            if (base / n).is_file():
+                return base / n
+    if Path(name).name != name:  # 경로로 적었는데 없으면 내장 양식 이름으로
+        return None
+    found = Vault(root).find_file(names[-1], note)
+    return found if found and found.suffix.lower() == ".toml" else None
+
+
 def build_from_obsidian(
     note: str | Path,
     output: str | Path | None = None,
@@ -731,11 +746,7 @@ def build_from_obsidian(
     if not isinstance(template, Template):
         name = template or meta.get("template")
         if name and not isinstance(name, Path):
-            for base in (note.parent, root):  # 볼트 안 양식 파일
-                cand = base / str(name)
-                if cand.is_file():
-                    name = cand
-                    break
+            name = find_vault_template(str(name), note, root) or name
         template = load_template(name)
     settings = ObsidianSettings.from_dict(template.obsidian)
     text, meta, warnings = expand_note(note, vault=root, box_names=set(template.boxes), settings=settings)
