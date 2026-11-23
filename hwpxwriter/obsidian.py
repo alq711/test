@@ -10,6 +10,8 @@ r"""Obsidian 볼트에서 교재 원고 만들기.
     ![[2025 9월모평 수학 30번 (기하)]]        ← 문제 노트 → ::: 문제 … :::
     ![[개념 정리 노트#위치와 속도]]            ← 일반 노트(의 한 부분)는 내용을 그대로
     \문제모음 subject=기하/평면벡터 year>=2024   ← 속성으로 골라 모으기 (연도·시험·번호순)
+    \문제모음 subject~타원                      ← ~ 는 "들어 있음" (타원의 접선, 타원과 쌍곡선 …)
+                                               이미 책에 들어간 문제는 다시 넣지 않음
 
 문제 노트 (속성 + 본문 + 정답 콜아웃)::
 
@@ -274,6 +276,7 @@ class BookBuilder:
         self.s = settings or ObsidianSettings()
         self.warnings: list[str] = []
         self._stack: list[Path] = []
+        self._used: set[Path] = set()  # 이미 책에 들어간 문제 노트 (\문제모음 이 다시 넣지 않음)
 
     # -- 판별 ------------------------------------------------------------
     def is_problem(self, note: Note) -> bool:
@@ -454,6 +457,7 @@ class BookBuilder:
         return note.name
 
     def problem_block(self, note: Note) -> list[str]:
+        self._used.add(note.path.resolve())
         lines = _COMMENT.sub("", note.body).split("\n")
         lines = self._drop_nav_tail(self._drop_title(lines))
         stem: list[str] = []
@@ -484,6 +488,8 @@ class BookBuilder:
             answer = _CIRCLED[int(answer) - 1]
         while stem and not stem[-1].strip():
             stem.pop()
+        # 문항 끝 배점 '(4점)' → 교재식 '[4점]'
+        stem = [re.sub(r"\s*\((\d(?:\.\d)?)\s*점\)\s*$", r" [\1점]", x) for x in stem]
         while solution and not solution[0].strip():
             solution.pop(0)
         out = ["", f"::: 문제 {self.source_line(note)}", *self.expand_lines(stem, note.path)]
@@ -515,7 +521,8 @@ class BookBuilder:
                 limit = int(value) if value.isdigit() else None
             else:
                 conds.append((key, op, value))
-        notes = [n for n in self.vault.notes() if n.path.resolve() not in self._stack and self.is_problem(n)
+        notes = [n for n in self.vault.notes() if n.path.resolve() not in self._stack
+                 and n.path.resolve() not in self._used and self.is_problem(n)
                  and all(_match(n.meta, k, op, v) for k, op, v in conds)]
 
         def sort_value(n: Note, key: str):

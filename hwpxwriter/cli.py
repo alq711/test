@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -151,7 +152,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             obsidian_mode = (
                 name != "-" and not args.text and src_path.suffix.lower() == ".md"
-                and (args.vault or "[[" in source or _in_vault(src_path))
+                and (args.vault or "[[" in source or _in_vault(src_path)
+                     or re.search(r"^\s*\\(문제모음|problems)\s", source, re.M))
             )
             if obsidian_mode:
                 from .textbook import build_from_obsidian
