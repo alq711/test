@@ -119,6 +119,8 @@ class ExamStyle:
     slots: int = 2  # 한 단을 몇 칸으로 나눌지 (문제는 칸 맨 위에서 시작)
     slot_top: float = 6.5  # 칸 위 여백 (머리말 선 ~ 문제 번호)
     first_slot_top: float = 4.5  # 첫 쪽(제목 아래) 칸 위 여백
+    title_gap_fix: float = 10.0  # 제목 덩어리 아래 빈 표에서 뺄 높이 (한글이 단 시작 전에 더 띄우는 만큼)
+    first_slack: float = 1.5  # 첫 쪽 왼쪽 단에서 더 비워 둘 높이 (칸이 다음 단으로 밀리지 않게)
     label_box: tuple[float, float] = (39, 8.3)  # '5지선다형' 상자
     label_gap: float = 9  # 상자 아래 ~ 문제
     check_height: float = 36.2  # 확인 사항 상자 높이
@@ -166,6 +168,7 @@ class ExamPaper(Textbook):
         self.force_break = False
         self.common_last: int | None = None
         self.unit_before = 0
+        self.answers_heading = False  # 머리말에 '정답과 해설' 이 있으므로 본문 제목은 생략
 
     # -- 진입점 ------------------------------------------------------------
     def build(self, markdown: str, *, base_dir: str | Path | None = None, title: str = "") -> HwpxDocument:
@@ -313,10 +316,15 @@ class ExamPaper(Textbook):
         return p.margin_top + p.margin_header
 
     def _column_height(self, doc: HwpxDocument, first: bool) -> float:
+        """한 단의 높이. 제목 덩어리가 있는 쪽의 '왼쪽' 단만 그만큼 짧다.
+
+        한글은 쪽 가운데에서 단 수를 바꾸면 왼쪽 단만 그 자리에서 이어지고, 오른쪽 단은
+        쪽 맨 위에서 시작한다. 원본 시험지도 1쪽 왼쪽 단이 짧고 오른쪽 단은 위까지 올라간다.
+        """
         p = doc.page
         h = p.size_mm()[1] - p.margin_top - p.margin_header - p.margin_bottom - p.margin_footer
         if first:
-            h -= max(self.x.title_rule - self._body_top(doc), 0)
+            h -= max(self.x.title_rule - self._body_top(doc), 0) + self.x.first_slack
         return h
 
     def _title_page(self, doc: HwpxDocument) -> None:
@@ -325,10 +333,16 @@ class ExamPaper(Textbook):
         doc.set_columns(1)
         doc.hide_on_this_page(header=True, footer=False)
         space = units.mm(max(x.title_rule - self._body_top(doc), 0))
-        tbl = self._title_block(doc)
         cid = doc.styles.char(doc._tiny_char())
-        para = ParaStyle(align="LEFT", line_spacing=100, space_after=max(space - units.pt(2), 0))
-        doc._append(para, 0, f'<hp:run charPrIDRef="{cid}">{tbl}<hp:t/></hp:run>', "", kind="object")
+        doc._append(ParaStyle(align="LEFT", line_spacing=100), 0,
+                    f'<hp:run charPrIDRef="{cid}">{self._title_block(doc)}<hp:t/></hp:run>', "", kind="object")
+        # 제목 덩어리는 종이 기준이라 자리를 차지하지 않는다. 빈 표로 그만큼 자리를 비운다
+        # (문단 뒤 간격은 단이 바뀌기 직전이면 한글이 무시한다)
+        none_bf = doc.styles.border(BorderFill())
+        w = doc.page.text_width
+        gap = max(space - units.mm(x.title_gap_fix), units.mm(1))
+        cell = doc._cell_xml(0, 0, w, [], none_bf, margin=(0, 0, 0, 0), height=gap)
+        self._put_table(doc, doc._table_xml([f"<hp:tr>{cell}</hp:tr>"], 1, w, gap, none_bf, in_margin=(0, 0, 0, 0)))
         doc.set_columns(2, gap=self.t.column_gap, line=True, line_color="#000000", line_width=x.column_line_width)
         self.page, self.col, self.unit, self.first_page = 1, 0, 0, True
 
@@ -339,8 +353,14 @@ class ExamPaper(Textbook):
 
     # -- 칸 -----------------------------------------------------------------
     def _slot_height(self, doc: HwpxDocument, n: int) -> int:
-        h = self._column_height(doc, self.first_page)
-        return units.mm(h * n / self.x.slots - 0.8)
+        h = self._column_height(doc, self.first_page and self.col == 0) - 0.8
+        return units.mm(h * n / self.x.slots)
+
+    def _put_table(self, doc: HwpxDocument, tbl: str, plain: str = "") -> None:
+        """표 하나를 본문에 붙인다. 글자처럼 취급하되 줄 높이가 늘지 않게 작은 글자로."""
+        cid = doc.styles.char(replace(doc._body_char, size=1))
+        doc._append(ParaStyle(align="LEFT", line_spacing=100), 0,
+                    f'<hp:run charPrIDRef="{cid}">{tbl}<hp:t/></hp:run>', plain, kind="object")
 
     def _place(self, doc: HwpxDocument, slot: _Slot, check: list[_Paragraph] | None = None) -> None:
         """칸 하나를 고정 높이 표(테두리 없음)로 놓는다. check: 칸 아래쪽에 붙일 확인 사항 상자 문단."""
@@ -358,8 +378,7 @@ class ExamPaper(Textbook):
         else:
             rows.append("<hp:tr>" + doc._cell_xml(0, 0, width, slot.paras, none_bf, margin=(0, 0, top, 0),
                                                   vert_align="TOP", height=height) + "</hp:tr>")
-        doc._place_table(rows, 1, width, height, none_bf, page_break="NONE", in_margin=(0, 0, 0, 0), inline=True,
-                         plain=slot.plain)
+        self._put_table(doc, doc._table_xml(rows, 1, width, height, none_bf, in_margin=(0, 0, 0, 0)), slot.plain)
 
     def _advance(self, doc: HwpxDocument, n: int) -> None:
         """n 칸을 쓸 자리로 옮긴다 (모자라면 다음 단·다음 쪽)."""
@@ -383,7 +402,8 @@ class ExamPaper(Textbook):
         """방금 _advance 로 정한 자리의 칸 높이·위 여백을 적어 둔다 (칸은 나중에 놓으므로)."""
         x = self.x
         slot.height = self._slot_height(doc, slot.units)
-        slot.top = units.mm(x.first_slot_top if (self.first_page and self.unit_before == 0) else x.slot_top)
+        first_top = self.first_page and self.col == 0 and self.unit_before == 0
+        slot.top = units.mm(x.first_slot_top if first_top else x.slot_top)
 
     def _flush(self, doc: HwpxDocument, check: list[_Paragraph] | None = None) -> None:
         slot, self.pending = self.pending, None

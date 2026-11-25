@@ -406,6 +406,7 @@ class Textbook(MarkdownHandler):
         self.base_dir = Path.cwd()
         self._problem_names = {n.lower() for n in self.t.problem.names}
         self._header_right: str | None = None
+        self.answers_heading = True  # '정답과 해설' 제목을 본문에 넣을지 (시험지는 머리말에 있으므로 끔)
 
     # -- 진입점 ------------------------------------------------------------
     def build(self, markdown: str, *, base_dir: str | Path | None = None, title: str = "") -> HwpxDocument:
@@ -651,7 +652,8 @@ class Textbook(MarkdownHandler):
         saved_right = self._header_right
         if self.t.header and self.t.header.right is not None:
             self._change_header(doc, a.title)
-        doc.add_heading(a.title, level=1)
+        if self.answers_heading:
+            doc.add_heading(a.title, level=1)
 
         groups: list[list[_AnswerEntry]] = []
         for e in entries:
