@@ -71,7 +71,42 @@ def test_subject_restarts_numbers():
     assert "「선택과목(미적분)」" in sec
 
 
-def test_big_problem_takes_column():
-    tb = make_renderer(load_template("모의고사"))
+def test_free_layout_big_problem_takes_column():
+    t = load_template("모의고사")
+    t.exam["layout"] = "free"
+    tb = make_renderer(t)
     tb.build(_exam(3, big={1}))
     assert (tb.page, tb.col, tb.unit) == (1, 1, 2)
+
+
+def _where(n_common, subject=None, n_sub=0):
+    """번호마다 (쪽, 단, 칸) 기록."""
+    tb = make_renderer(load_template("모의고사"))
+    seen = []
+    orig = tb._push
+
+    def push(doc, slot):
+        orig(doc, slot)
+        seen.append((tb.subject_name, tb.page, tb.col, tb.unit_before))
+
+    tb._push = push
+    tb.build(_exam(n_common, big={1, 2, 3}, subject=subject, n_sub=n_sub))
+    return seen
+
+
+def test_fixed_layout_matches_suneung():
+    seen = _where(22, subject="미적분", n_sub=8)
+    common = {i + 1: s[1:] for i, s in enumerate(seen[:22])}
+    # '크게' 표시는 무시되고 평가원 원본 자리대로
+    assert common[1] == (1, 0, 0) and common[2] == (1, 0, 1) and common[3] == (1, 1, 0) and common[4] == (1, 1, 1)
+    assert common[7] == (2, 1, 0) and common[10] == (3, 1, 0)
+    assert common[15] == (6, 0, 0) and common[16] == (6, 1, 0) and common[17] == (6, 1, 1)
+    assert common[20] == (7, 1, 0) and common[21] == (8, 0, 0) and common[22] == (8, 1, 0)
+    sub = [s[1:] for s in seen[22:]]
+    assert sub == [(p, c, 0) for p in (1, 2, 3, 4) for c in (0, 1)]
+
+
+def test_fixed_layout_auto_labels():
+    doc = build_textbook(_exam(22, subject="미적분", n_sub=8).replace("\\5지선다형\n", ""), template="모의고사")
+    sec, _ = _section(doc)
+    assert sec.count(">5지선다형<") == 2 and sec.count(">단답형<") == 2

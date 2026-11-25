@@ -17,17 +17,21 @@ Markdown::
     영역: 수학 영역
     유형: 홀수형
     :::
-    \5지선다형
     ::: 문제
     $\sqrt[3]{8}$의 값은? [2점]
     ① 1 ② 2 ③ 3 ④ 4 ⑤ 5
     [정답] ②
     :::
-    ::: 문제 크게             ← 단 하나를 통째로 쓰는 문제 (기본은 반 단)
     ...
-    :::
-    \단답형
     \선택과목 미적분          ← 새 쪽, '수학 영역(미적분)', 23번부터
+
+문제 자리는 번호마다 고정이다 (layout = "fixed", 평가원 원본과 같음):
+1쪽 1·2 | 3·4, 2쪽 5·6 | 7, 3쪽 8·9 | 10, 4쪽 11 | 12, 5쪽 13 | 14, 6쪽 15 | 단답형 16·17,
+7쪽 18·19 | 20, 8쪽 21 | 22 + 확인 사항. 선택과목 23~30번은 한 단에 한 문제, 29번 앞 '단답형'.
+'5지선다형'·'단답형' 상자도 번호에 맞춰 저절로 들어간다.
+
+layout = "free" 이면 자리를 직접 정한다: '::: 문제 크게' = 한 단 통째 (기본 반 단),
+\5지선다형 · \단답형 = 상자를 넣을 자리.
 """
 
 from __future__ import annotations
@@ -117,12 +121,22 @@ class ExamStyle:
     box_line: str = "0.2 mm"  # 둥근 상자 선
     column_line_width: str = "0.3 mm"
     slots: int = 2  # 한 단을 몇 칸으로 나눌지 (문제는 칸 맨 위에서 시작)
-    slot_top: float = 6.5  # 칸 위 여백 (머리말 선 ~ 문제 번호)
-    first_slot_top: float = 4.5  # 첫 쪽(제목 아래) 칸 위 여백
+    # 문제 배치: "fixed" = 평가원 시험지와 같은 번호별 고정 자리, "free" = '::: 문제 크게' 로 정함
+    layout: str = "fixed"
+    # 번호별 칸 수 (1 = 반 단, 2 = 한 단). 평가원 수학 문제지 (2023 수능·2027 6월 모평 등 실측):
+    #   1쪽 1·2 | 3·4   2쪽 5·6 | 7   3쪽 8·9 | 10   4쪽 11 | 12   5쪽 13 | 14
+    #   6쪽 15 | (단답형) 16·17   7쪽 18·19 | 20   8쪽 21 | 22 + 확인 사항
+    common_slots: tuple[int, ...] = (1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 2, 2, 2)
+    #   선택과목 1쪽 23 | 24   2쪽 25 | 26   3쪽 27 | 28   4쪽 (단답형) 29 | 30 + 확인 사항
+    elective_slots: tuple[int, ...] = (2, 2, 2, 2, 2, 2, 2, 2)
+    common_short_from: int = 16  # 단답형이 시작하는 번호 (공통 안에서 몇째 문제)
+    elective_short_from: int = 7  # 선택과목 안에서 몇째 문제부터 단답형 (29번)
+    slot_top: float = 4.6  # 칸 위 여백 (머리말 선 ~ 문제 번호)
+    first_slot_top: float = 6.8  # 첫 쪽(제목 아래) 칸 위 여백
     title_gap_fix: float = 10.0  # 제목 덩어리 아래 빈 표에서 뺄 높이 (한글이 단 시작 전에 더 띄우는 만큼)
     first_slack: float = 1.5  # 첫 쪽 왼쪽 단에서 더 비워 둘 높이 (칸이 다음 단으로 밀리지 않게)
     label_box: tuple[float, float] = (39, 8.3)  # '5지선다형' 상자
-    label_gap: float = 9  # 상자 아래 ~ 문제
+    label_gap: float = 7  # 상자 아래 ~ 문제
     check_height: float = 36.2  # 확인 사항 상자 높이
     page_box: tuple[float, float] = (18, 7.8)  # 꼬리말 '1/20' 칸
     page_box_gap: float = 5.2  # 본문 아래 ~ 쪽 번호 칸
@@ -168,6 +182,7 @@ class ExamPaper(Textbook):
         self.force_break = False
         self.common_last: int | None = None
         self.unit_before = 0
+        self.section_no = 0  # 지금 과목(공통/선택) 안에서 몇째 문제인지
         self.answers_heading = False  # 머리말에 '정답과 해설' 이 있으므로 본문 제목은 생략
 
     # -- 진입점 ------------------------------------------------------------
@@ -316,11 +331,7 @@ class ExamPaper(Textbook):
         return p.margin_top + p.margin_header
 
     def _column_height(self, doc: HwpxDocument, first: bool) -> float:
-        """한 단의 높이. 제목 덩어리가 있는 쪽의 '왼쪽' 단만 그만큼 짧다.
-
-        한글은 쪽 가운데에서 단 수를 바꾸면 왼쪽 단만 그 자리에서 이어지고, 오른쪽 단은
-        쪽 맨 위에서 시작한다. 원본 시험지도 1쪽 왼쪽 단이 짧고 오른쪽 단은 위까지 올라간다.
-        """
+        """한 단의 높이. 제목 덩어리가 있는 쪽은 두 단 모두 굵은 선 아래에서 시작해 그만큼 짧다."""
         p = doc.page
         h = p.size_mm()[1] - p.margin_top - p.margin_header - p.margin_bottom - p.margin_footer
         if first:
@@ -353,7 +364,7 @@ class ExamPaper(Textbook):
 
     # -- 칸 -----------------------------------------------------------------
     def _slot_height(self, doc: HwpxDocument, n: int) -> int:
-        h = self._column_height(doc, self.first_page and self.col == 0) - 0.8
+        h = self._column_height(doc, self.first_page) - 0.8
         return units.mm(h * n / self.x.slots)
 
     def _put_table(self, doc: HwpxDocument, tbl: str, plain: str = "") -> None:
@@ -402,7 +413,7 @@ class ExamPaper(Textbook):
         """방금 _advance 로 정한 자리의 칸 높이·위 여백을 적어 둔다 (칸은 나중에 놓으므로)."""
         x = self.x
         slot.height = self._slot_height(doc, slot.units)
-        first_top = self.first_page and self.col == 0 and self.unit_before == 0
+        first_top = self.first_page and self.unit_before == 0
         slot.top = units.mm(x.first_slot_top if first_top else x.slot_top)
 
     def _flush(self, doc: HwpxDocument, check: list[_Paragraph] | None = None) -> None:
@@ -482,6 +493,10 @@ class ExamPaper(Textbook):
         self._measure(doc, filler)
         self._place(doc, filler, check)
 
+    @property
+    def _fixed(self) -> bool:
+        return str(self.x.layout).lower() in ("fixed", "고정")
+
     # -- 처리기 ------------------------------------------------------------
     def heading(self, doc: HwpxDocument, level: int, raw: str, inline) -> bool:
         return False
@@ -489,6 +504,8 @@ class ExamPaper(Textbook):
     def directive(self, doc: HwpxDocument, name: str, arg: str) -> bool:
         key = name.lower()
         if name in _LABEL_DIRECTIVES:
+            if self._fixed:
+                return True  # 고정 배치에서는 5지선다형·단답형 상자도 번호에 따라 자동으로
             label = _LABEL_DIRECTIVES[name]
             self.pending_label = self.x.label_1 if label == "5지선다형" else self.x.label_2
             return True
@@ -500,6 +517,7 @@ class ExamPaper(Textbook):
                 self.common_last = self.problem_no
             self.problem_no = self.common_last
             self.subject_name = subject
+            self.section_no = 0
             doc.add_page_break()
             self._title_page(doc)
             return True
@@ -542,6 +560,17 @@ class ExamPaper(Textbook):
         m = re.search(r"(\d+)\s*칸", title)
         if m:
             n = int(m.group(1))
+        self.section_no += 1
+        if self._fixed:
+            table = x.elective_slots if self.subject_name else x.common_slots
+            short = x.elective_short_from if self.subject_name else x.common_short_from
+            k = self.section_no
+            if k <= len(table):
+                n = int(table[k - 1])  # 고정 자리 ('크게' 는 무시)
+            if k == 1:
+                self.pending_label = x.label_1
+            elif k == short:
+                self.pending_label = x.label_2
         self.problem_no += 1
         number = p.number_format.format(n=self.problem_no, chapter=self.chapter)
         stem, answer, solution = _split_problem(lines)
