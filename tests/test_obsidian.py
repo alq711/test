@@ -22,7 +22,7 @@ from test_hwpx import HP, validate
 VAULT = Path(__file__).resolve().parent.parent / "examples" / "obsidian_vault"
 BOOK = VAULT / "교재" / "수능 파이널 (예시).md"
 NOTE30 = VAULT / "20_Teaching_Materials" / "마더텅 수능기출" / "2025 9월모평" / "2025 9월모평 수학 30번 (기하).md"
-BOXES = set(load_template("수능파이널").boxes)
+BOXES = set(load_template("문제집").boxes)
 
 
 def builder() -> BookBuilder:
@@ -58,6 +58,7 @@ def test_user_problem_note_becomes_problem_block():
     assert b.is_problem(note)
     text = "\n".join(b.problem_block(note))
     assert "::: 문제 2025학년도 9월 모의평가 30번" in text
+    assert "(4점)" not in text and "[4점]" in text  # 배점은 교재식 대괄호로
     assert "[정답] 54" in text
     assert "정답: 54" not in text  # 콜아웃 안 정답 줄은 정답표로만
     assert "[해설]" in text and "M+m=54" in text
@@ -92,10 +93,29 @@ def test_query_filters_sorts_and_limits():
     nine = "\n".join(b.query("subject=수학Ⅱ year>=2027", BOOK))
     assert nine.index("6월 모의평가") < nine.index("9월 모의평가")  # 같은 해: 6월 → 9월
     assert "기하" not in nine
-    assert "\n".join(b.query("subject=수학Ⅱ sort=-exam limit=1", BOOK)).count("::: 문제") == 1
-    assert "9월 모의평가" in "\n".join(b.query("subject=수학Ⅱ sort=-exam limit=1", BOOK))
-    assert "30번" in "\n".join(b.query("tags=수능기출 number>20", BOOK))
+    last = "\n".join(builder().query("subject=수학Ⅱ sort=-exam limit=1", BOOK))
+    assert last.count("::: 문제") == 1 and "9월 모의평가" in last
+    assert "30번" in "\n".join(builder().query("tags=수능기출 number>20", BOOK))
     assert b.query("subject=없는과목", BOOK) == [] and b.warnings
+
+
+def test_query_skips_problems_already_in_book():
+    b = builder()
+    first = "\n".join(b.query("subject=수학Ⅱ", BOOK))
+    assert first.count("::: 문제") >= 2
+    assert b.query("subject=수학Ⅱ", BOOK) == []  # 같은 문제를 두 번 넣지 않음
+    b2 = builder()
+    b2.embed_note("2027 9월모평 수학 9번", None, BOOK)
+    again = "\n".join(b2.query("subject=수학Ⅱ", BOOK))
+    assert again.count("::: 문제") == first.count("::: 문제") - 1
+
+
+def test_query_only_book_outside_vault_uses_obsidian_mode(tmp_path: Path):
+    book = tmp_path / "책.md"
+    book.write_text("---\ntemplate: 문제집\n---\n# 01 벡터\n\\문제모음 subject=기하\n", encoding="utf-8")
+    out = tmp_path / "책.hwpx"
+    assert cli_main([str(book), "--vault", str(VAULT), "-o", str(out)]) == 0
+    assert cli_main([str(book), "-o", str(tmp_path / "b.hwpx")]) == 0  # 볼트 밖이어도 문제모음은 펼쳐 봄
 
 
 def test_missing_note_and_self_embed_warn(tmp_path: Path):
@@ -125,8 +145,55 @@ def test_build_book_end_to_end(tmp_path: Path):
 
 def test_single_problem_note_and_cli(tmp_path: Path):
     out = tmp_path / "30.hwpx"
-    assert cli_main([str(NOTE30), "-t", "수능파이널", "-o", str(out)]) == 0
+    assert cli_main([str(NOTE30), "-t", "문제집", "-o", str(out)]) == 0
     validate(out.read_bytes())
     out2 = tmp_path / "book.hwpx"
     assert cli_main([str(BOOK), "--vault", str(VAULT), "-o", str(out2)]) == 0
     validate(out2.read_bytes())
+
+
+def _mini_vault(tmp_path: Path) -> Path:
+    v = tmp_path / "v"
+    (v / ".obsidian").mkdir(parents=True)
+    (v / "문제").mkdir()
+    (v / "교재" / "양식").mkdir(parents=True)
+    (v / "문제" / "포물선 1.md").write_text(
+        "---\ntype: problem-bank\nsubject: 기하/이차곡선/포물선\nanswer: \"3\"\npoints: 3\n---\n"
+        "# 포물선 1\n\n포물선 $y^2=4x$의 초점의 $x$좌표는?\n\n> **[보기]**\n>\n> ㄱ. 참\n\n"
+        "> [!bogi] 보기\n> ㄴ. 거짓\n\n① 1　② 2　③ 3　④ 4　⑤ 5\n", encoding="utf-8")
+    (v / "문제" / "타원 1.md").write_text(
+        "---\ntype: problem-bank\nsubject: 기하/타원\n---\n타원 문제 (4점)\n", encoding="utf-8")
+    (v / "교재" / "단원 목록.md").write_text("---\ntype: note\n---\n- 기하/이차곡선/포물선\n- 기하/이차곡선/타원\n",
+                                            encoding="utf-8")
+    shutil.copy(Path(__file__).resolve().parent.parent / "hwpxwriter" / "templates" / "문제집.toml",
+                v / "교재" / "양식" / "내 문제집.toml")
+    (v / "교재" / "책.md").write_text(
+        "---\ntype: book\ntemplate: 내 문제집\noutput: 출력/\n---\n# 01 포물선\n\\문제모음 subject=기하/이차곡선/포물선\n"
+        "# 02 없음\n\\문제모음 subject=기하/없음\n", encoding="utf-8")
+    return v
+
+
+def test_points_property_and_bogi_boxes(tmp_path: Path):
+    v = _mini_vault(tmp_path)
+    b = BookBuilder(Vault(v), box_names=BOXES)
+    text = "\n".join(b.problem_block(b.vault.read(v / "문제" / "포물선 1.md")))
+    assert "좌표는? [3점]" in text  # 속성 points → 발문 끝
+    assert text.count("::: 보기") == 2 and "[보기]**" not in text and "[!bogi]" not in text
+    assert "[정답] ③" in text
+
+
+def test_vault_template_output_property_and_check(tmp_path: Path, capsys):
+    v = _mini_vault(tmp_path)
+    book = v / "교재" / "책.md"
+    assert cli_main([str(book)]) == 0
+    assert (v / "교재" / "출력" / "책.hwpx").is_file()  # output: 출력/
+    from hwpxwriter.textbook import find_vault_template
+
+    assert find_vault_template("내 문제집", book, v) == v / "교재" / "양식" / "내 문제집.toml"
+    assert find_vault_template("문제집", book, v) is None  # 볼트에 없으면 내장 양식
+    capsys.readouterr()
+    assert cli_main(["--check", str(v)]) == 1
+    out = capsys.readouterr().out
+    assert "문제/타원 1.md" in out and "정답 없음" in out and "단원 목록에 없는 단원: 기하/타원" in out
+    assert "배점" not in out  # (4점) 이 본문에 있음
+    assert "교재/책.md" in out and "기하/없음" in out

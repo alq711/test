@@ -49,7 +49,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 TEMPLATE_DIR = Path(__file__).with_name("templates")
 BUILTIN_TEMPLATE = TEMPLATE_DIR / "수학교재.toml"
-_BUILTIN_ALIASES = {"기본": "수학교재", "default": "수학교재", "math": "수학교재", "suneung": "수능파이널"}
+_BUILTIN_ALIASES = {"기본": "수학교재", "default": "수학교재", "math": "수학교재", "suneung": "문제집", "수능파이널": "문제집", "workbook": "문제집", "수능": "모의고사", "시험지": "모의고사", "exam": "모의고사"}
 
 _PROBLEM_NAMES = {"문제", "problem", "연습문제", "연습", "exercise"}
 _COVER_NAMES = {"표지", "cover"}
@@ -88,6 +88,10 @@ class ProblemStyle:
     columns: int = 0  # 문제가 나오면 자동으로 바꿀 단 수 (0 = 그대로)
     column_line: bool = True
     names: tuple[str, ...] = tuple(sorted(_PROBLEM_NAMES))
+    # 문제 구역: 이 제목으로 시작하는 '## ' 제목부터 다음 '## ' 제목까지
+    section_titles: tuple[str, ...] = ("확인 문제", "연습 문제", "기출 문제", "최근 기출", "실전 문제", "유형 문제")
+    new_page: bool = False  # 문제 구역을 새 쪽에서 시작 (개념 쪽과 문제 쪽을 나눔). 개념으로 돌아갈 때도 새 쪽
+    section_header: str | None = None  # 문제 구역 머리말 오른쪽 글. {chapter}=단원, {section}=구역 제목
 
 
 @dataclass
@@ -123,8 +127,10 @@ class CoverStyle:
     rule_color: str = "#000000"
     desc_color: str = "#595959"
     desc_size: float = 9.0
-    author_space: float = 110.0  # mm: 설명과 저자 사이
+    author_space: float = 110.0  # mm: 설명과 저자 사이 (author_y 가 없을 때)
     author_size: float = 10.0
+    author_y: float | None = None  # mm: 종이 위에서 저자 줄까지 (정하면 본문 흐름과 상관없이 그 자리에)
+    author_color: str = "#222222"
 
 
 @dataclass
@@ -168,6 +174,7 @@ class Template:
     cover: CoverStyle = field(default_factory=CoverStyle)
     boxes: dict[str, BoxDef] = field(default_factory=dict)
     obsidian: dict = field(default_factory=dict)  # [obsidian] 설정 (obsidian.ObsidianSettings)
+    exam: dict | None = None  # [exam] 시험지 양식 (exam.ExamStyle). 있으면 수능 시험지처럼 조판
     warnings: list[str] = field(default_factory=list)
 
 
@@ -188,7 +195,7 @@ def _apply(obj: Any, data: dict, where: str, warnings: list[str], rename: dict[s
 
 
 def resolve_template_path(path: str | Path | None) -> Path:
-    """양식 경로. 내장 양식 이름(기본, 수학교재, 수능파이널)도 받는다."""
+    """양식 경로. 내장 양식 이름(기본, 수학교재, 문제집)도 받는다. 예전 이름 수능파이널 = 문제집."""
     if path is None:
         return BUILTIN_TEMPLATE
     p = Path(path)
@@ -242,10 +249,27 @@ def template_from_dict(data: dict) -> Template:
         page.update(margin_top=top, margin_right=right, margin_bottom=bottom, margin_left=left)
     t.page = _apply(t.page, page, "page", w, convert={"paper": lambda v: tuple(v) if isinstance(v, list) else v})
 
+    font = dict(data.pop("font", {}))
+    lang_map: dict[str, dict[str, str]] = {}
+    for key, langs in (("latin", ("LATIN", "SYMBOL", "OTHER")), ("hanja", ("HANJA",)), ("symbol", ("SYMBOL",))):
+        # [font] latin = { "신명 중명조" = "한양신명조" } → 그 글꼴의 영문·숫자·기호만 다른 글꼴로
+        spec = font.pop(key, None)
+        if spec is None:
+            continue
+        if not isinstance(spec, dict):
+            spec = {font.get("body", Theme.body_font): spec}
+        for base, other in spec.items():
+            for lang in langs:
+                lang_map.setdefault(base, {})[lang] = other
+    if lang_map:
+        font["font_lang"] = lang_map
+    for key in ("ratio", "spacing"):  # 장평·자간: 숫자 하나면 본문 글꼴, 표면 글꼴별
+        if key in font and not isinstance(font[key], dict):
+            font[key] = {font.get("body", Theme.body_font): font[key]}
     theme = _apply(
-        Theme(), dict(data.pop("font", {})), "font", w,
+        Theme(), font, "font", w,
         rename={"body": "body_font", "heading": "heading_font", "code": "code_font", "size": "font_size",
-                "color": "text_color"},
+                "color": "text_color", "ratio": "font_ratio", "spacing": "font_spacing"},
     )
     heading = dict(data.pop("heading", {}))
     levels = {k: heading.pop(k) for k in list(heading) if isinstance(heading[k], dict)}
@@ -284,9 +308,23 @@ def template_from_dict(data: dict) -> Template:
         w.append(f"양식 [chapter] 의 '{k}' 는 알 수 없는 항목이라 무시했습니다")
 
     t.problem = _apply(t.problem, dict(data.pop("problem", {})), "problem", w,
-                       convert={"names": lambda v: tuple(v)})
+                       convert={"names": lambda v: tuple(v), "section_titles": lambda v: tuple(v)})
     t.answers = _apply(t.answers, dict(data.pop("answers", {})), "answers", w)
     t.cover = _apply(t.cover, dict(data.pop("cover", {})), "cover", w)
+    choices = dict(data.pop("choices", {}))
+    theme_ch = {}
+    for key, name in (("space_before", "choice_space_before"), ("pad_left", "choice_pad_left")):
+        if key in choices:
+            theme_ch[name] = float(choices.pop(key))
+    for k in choices:
+        w.append(f"양식 [choices] 의 '{k}' 는 알 수 없는 항목이라 무시했습니다")
+    if theme_ch:
+        t.theme = replace(t.theme, **theme_ch)
+    if "exam" in data:
+        from .exam import ExamStyle
+
+        t.exam = dict(data.pop("exam"))
+        ExamStyle.from_dict(t.exam, w)  # 오타 경고만
     t.obsidian = dict(data.pop("obsidian", {}))
     if t.obsidian:
         from .obsidian import ObsidianSettings
@@ -368,15 +406,17 @@ class Textbook(MarkdownHandler):
         self.base_dir = Path.cwd()
         self._problem_names = {n.lower() for n in self.t.problem.names}
         self._header_right: str | None = None
+        self.answers_heading = True  # '정답과 해설' 제목을 본문에 넣을지 (시험지는 머리말에 있으므로 끔)
 
     # -- 진입점 ------------------------------------------------------------
     def build(self, markdown: str, *, base_dir: str | Path | None = None, title: str = "") -> HwpxDocument:
         t = self.t
         doc = HwpxDocument(t.page, t.theme, title=title or t.title)
         doc.warnings.extend(t.warnings)
+        self.book_title = title or t.title
         if t.header:
             self._header_right = t.header.right
-            doc.set_header(t.header.left, **t.header.kwargs(self._right_text(t.header.right)))
+            doc.set_header(self._left_text(), **t.header.kwargs(self._right_text(t.header.right)))
         if t.footer:
             doc.set_footer(t.footer.left, **t.footer.kwargs(t.footer.right))
         if t.columns > 1:
@@ -394,6 +434,11 @@ class Textbook(MarkdownHandler):
     def _inline(self, doc: HwpxDocument, text: str, **base: object) -> list[Run]:
         return parse_inline(text, Run("", **base), doc.theme.link_color)
 
+    def _left_text(self) -> str:
+        """머리말 왼쪽 글. {title} 은 책 이름(표지 제목 | 부제, 또는 문서 제목)으로 바뀐다."""
+        left = self.t.header.left if self.t.header else ""
+        return left.replace("{title}", getattr(self, "book_title", "") or "").strip(" |")
+
     def _right_text(self, right: str | None) -> str | None:
         if right is None:
             return None
@@ -402,7 +447,7 @@ class Textbook(MarkdownHandler):
     def _change_header(self, doc: HwpxDocument, right: str | None) -> None:
         if self.t.header is None:
             return
-        doc.change_header(self.t.header.left, **self.t.header.kwargs(self._right_text(right)))
+        doc.change_header(self._left_text(), **self.t.header.kwargs(self._right_text(right)))
 
     def _restore_columns(self, doc: HwpxDocument) -> None:
         if doc.at_top_level and doc._columns[0] != max(self.t.columns, 1):
@@ -412,9 +457,13 @@ class Textbook(MarkdownHandler):
     def heading(self, doc: HwpxDocument, level: int, raw: str, inline) -> bool:
         if not doc.at_top_level:
             return False
+        if level == 2:
+            self._problem_section(doc, raw)
         if level <= 2:
             self._restore_columns(doc)
         if level == 1:
+            self._in_problem_section = False
+            self._fresh_chapter = True
             number, title, _ = split_heading(raw, True)
             if self.t.chapter_new_page and doc._paragraphs:
                 doc.add_page_break()
@@ -429,6 +478,27 @@ class Textbook(MarkdownHandler):
             if self.t.header and self.t.header.right and "{chapter}" in self.t.header.right:
                 self._change_header(doc, self.t.header.right)
         return False
+
+    def _problem_section(self, doc: HwpxDocument, raw: str) -> None:
+        """'## 확인 문제' 같은 문제 구역의 시작·끝: 새 쪽, 머리말 바꾸기."""
+        p = self.t.problem
+        _, title, _ = split_heading(raw, False)
+        title = re.sub(r"[*_`$]", "", title).strip()
+        is_problem = any(title.startswith(name) for name in p.section_titles)
+        fresh = getattr(self, "_fresh_chapter", False)
+        self._fresh_chapter = False
+        was = getattr(self, "_in_problem_section", False)
+        if is_problem == was:
+            return
+        self._in_problem_section = is_problem
+        if p.new_page and doc._paragraphs and not fresh:
+            doc.add_page_break()
+        if p.section_header and self.t.header and self.t.header.right is not None:
+            if is_problem:
+                section = title.partition(" | ")[0].strip()
+                self._change_header(doc, p.section_header.replace("{section}", section))
+            else:
+                self._change_header(doc, self._header_right)
 
     def directive(self, doc: HwpxDocument, name: str, arg: str) -> bool:
         key = name.lower()
@@ -468,6 +538,13 @@ class Textbook(MarkdownHandler):
                 info[key if key == "desc" else "desc"].append(line.strip())
         if not doc._paragraphs:
             doc.hide_first_page = True
+        if info["title"] and self.t.header and "{title}" in self.t.header.left:
+            # 머리말 왼쪽 '{title}' = 표지 제목 | 부제(작은 글씨 부분 빼고)
+            name = re.sub(r"[*_`$]", "", info["title"][0])
+            if info["subtitle"]:
+                name += " | " + re.sub(r"[*_`$]", "", info["subtitle"][0].partition(" | ")[0])
+            self.book_title = name
+            self._change_header(doc, self._header_right)
         if c.band_color:
             doc.add_page_band(c.band_color, c.band_height)
         doc.add_spacer(c.top_space)
@@ -490,7 +567,13 @@ class Textbook(MarkdownHandler):
             for text in info["desc"]:
                 doc.add_paragraph(self._inline(doc, text), size=c.desc_size, color=c.desc_color, font=head,
                                   align="left", line_spacing=140, space_after=0)
-        if info["author"]:
+        if info["author"] and c.author_y is not None:
+            # 종이 기준 고정 위치: 설명이 길어도 저자가 다음 쪽으로 밀려나지 않는다
+            x = doc.page.margin_left
+            for i, text in enumerate(info["author"]):
+                doc.add_paper_text(self._inline(doc, text), x=x, y=c.author_y + i * c.author_size * 0.6,
+                                   size=c.author_size, color=c.author_color, font=head)
+        elif info["author"]:
             doc.add_spacer(c.author_space)
             for text in info["author"]:
                 doc.add_paragraph(self._inline(doc, text), size=c.author_size, font=head, align="left")
@@ -569,7 +652,8 @@ class Textbook(MarkdownHandler):
         saved_right = self._header_right
         if self.t.header and self.t.header.right is not None:
             self._change_header(doc, a.title)
-        doc.add_heading(a.title, level=1)
+        if self.answers_heading:
+            doc.add_heading(a.title, level=1)
 
         groups: list[list[_AnswerEntry]] = []
         for e in entries:
@@ -637,6 +721,15 @@ class Textbook(MarkdownHandler):
         doc.add_spacer(2)
 
 
+def make_renderer(template: Template) -> Textbook:
+    """양식에 맞는 조판기: [exam] 이 있으면 시험지(ExamPaper), 아니면 교재(Textbook)."""
+    if template.exam is not None:
+        from .exam import ExamPaper
+
+        return ExamPaper(template)
+    return Textbook(template)
+
+
 def render_inline(doc: HwpxDocument, text: str) -> list[Run]:
     return parse_inline(text, Run(""), doc.theme.link_color)
 
@@ -651,10 +744,25 @@ def build_textbook(
 ) -> HwpxDocument:
     """확장 Markdown 으로 교재를 만들고, output 이 있으면 저장한다."""
     tpl = template if isinstance(template, Template) else load_template(template)
-    doc = Textbook(tpl).build(markdown, base_dir=base_dir, title=title)
+    doc = make_renderer(tpl).build(markdown, base_dir=base_dir, title=title)
     if output is not None:
         doc.save(output)
     return doc
+
+
+def find_vault_template(name: str, note: Path, root: Path) -> Path | None:
+    """볼트 안 양식 파일: 책 노트 옆 → 볼트 맨 위 → 볼트 어디든 '<이름>.toml' (가까운 것 먼저)."""
+    from .obsidian import Vault
+
+    names = [name] if name.lower().endswith(".toml") else [name, name + ".toml"]
+    for base in (note.parent, root):
+        for n in names:
+            if (base / n).is_file():
+                return base / n
+    if Path(name).name != name:  # 경로로 적었는데 없으면 내장 양식 이름으로
+        return None
+    found = Vault(root).find_file(names[-1], note)
+    return found if found and found.suffix.lower() == ".toml" else None
 
 
 def build_from_obsidian(
@@ -677,15 +785,11 @@ def build_from_obsidian(
     if not isinstance(template, Template):
         name = template or meta.get("template")
         if name and not isinstance(name, Path):
-            for base in (note.parent, root):  # 볼트 안 양식 파일
-                cand = base / str(name)
-                if cand.is_file():
-                    name = cand
-                    break
+            name = find_vault_template(str(name), note, root) or name
         template = load_template(name)
     settings = ObsidianSettings.from_dict(template.obsidian)
     text, meta, warnings = expand_note(note, vault=root, box_names=set(template.boxes), settings=settings)
-    doc = Textbook(template).build(text, base_dir=note.parent, title=title or str(meta.get("title") or note.stem))
+    doc = make_renderer(template).build(text, base_dir=note.parent, title=title or str(meta.get("title") or note.stem))
     doc.warnings[:0] = warnings
     if output is not None:
         doc.save(output)

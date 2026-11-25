@@ -3,13 +3,15 @@ r"""Obsidian 볼트에서 교재 원고 만들기.
 책 노트(설계도) 하나를 받아 교재용 확장 Markdown 으로 펼친다::
 
     ---
-    template: 수능파이널
+    template: 문제집
     ---
     # 09 수직선 위의 운동
     ## 최근 기출 | 공통 9번
     ![[2025 9월모평 수학 30번 (기하)]]        ← 문제 노트 → ::: 문제 … :::
     ![[개념 정리 노트#위치와 속도]]            ← 일반 노트(의 한 부분)는 내용을 그대로
     \문제모음 subject=기하/평면벡터 year>=2024   ← 속성으로 골라 모으기 (연도·시험·번호순)
+    \문제모음 subject~타원                      ← ~ 는 "들어 있음" (타원의 접선, 타원과 쌍곡선 …)
+                                               이미 책에 들어간 문제는 다시 넣지 않음
 
 문제 노트 (속성 + 본문 + 정답 콜아웃)::
 
@@ -47,6 +49,9 @@ _CALLOUT = re.compile(r"^\s*>\s*\[!([^\]]+)\]([+-]?)\s*(.*)$")
 _QUOTE_LINE = re.compile(r"^\s*>\s?(.*)$")
 _ANSWER_LINE = re.compile(r"^\s*\**\s*(?:정답|답|answer)\s*\**\s*[:：]\s*(.+?)\s*\**\s*$", re.I)
 _QUERY_LINE = re.compile(r"^\s*\\(문제모음|problems)\s+(.*)$")
+# 예전 표기: '> **[보기]**' 로 시작하는 인용문 → 〈보기〉 상자
+_LEGACY_BOX = re.compile(r"^\s*>\s*\**\s*[\[〈<(]\s*(보\s*기|조\s*건)\s*[\]〉>)]\s*\**\s*$")
+_POINTS = re.compile(r"[\[(]\s*\d(?:\.\d)?\s*점\s*[\])]")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
 
@@ -58,6 +63,7 @@ DEFAULT_CALLOUT_BOXES = {
     "warning": "주의", "caution": "주의", "attention": "주의", "danger": "주의", "error": "주의",
     "example": "예제", "abstract": "정의", "summary": "정의", "tldr": "정의", "definition": "정의",
     "theorem": "정리", "proof": "증명", "formula": "공식",
+    "bogi": "보기", "choices": "보기", "cond": "조건", "condition": "조건",
 }
 DEFAULT_ANSWER_CALLOUTS = {"check", "success", "done", "answer", "solution", "정답", "풀이", "해설"}
 DEFAULT_PROBLEM_TYPES = {"problem-bank", "problem", "문제", "문제은행", "기출"}
@@ -274,6 +280,7 @@ class BookBuilder:
         self.s = settings or ObsidianSettings()
         self.warnings: list[str] = []
         self._stack: list[Path] = []
+        self._used: set[Path] = set()  # 이미 책에 들어간 문제 노트 (\문제모음 이 다시 넣지 않음)
 
     # -- 판별 ------------------------------------------------------------
     def is_problem(self, note: Note) -> bool:
@@ -368,6 +375,15 @@ class BookBuilder:
                 out.extend(self.query(m.group(2), near))
                 i += 1
                 continue
+            m = _LEGACY_BOX.match(line)
+            if m:
+                block = []
+                i += 1
+                while i < len(lines) and _QUOTE_LINE.match(lines[i]):
+                    block.append(lines[i])
+                    i += 1
+                out.extend(self.callout(m.group(1).replace(" ", ""), "", block, near))
+                continue
             m = _CALLOUT.match(line)
             if m:
                 block = [line]
@@ -454,6 +470,7 @@ class BookBuilder:
         return note.name
 
     def problem_block(self, note: Note) -> list[str]:
+        self._used.add(note.path.resolve())
         lines = _COMMENT.sub("", note.body).split("\n")
         lines = self._drop_nav_tail(self._drop_title(lines))
         stem: list[str] = []
@@ -484,6 +501,11 @@ class BookBuilder:
             answer = _CIRCLED[int(answer) - 1]
         while stem and not stem[-1].strip():
             stem.pop()
+        # 문항 끝 배점 '(4점)' → 교재식 '[4점]'
+        stem = [re.sub(r"\s*\((\d(?:\.\d)?)\s*점\)\s*$", r" [\1점]", x) for x in stem]
+        points = note.meta.get("points")
+        if points not in (None, "") and not any(_POINTS.search(x) for x in stem):
+            stem = _add_points(stem, f"[{points}점]")
         while solution and not solution[0].strip():
             solution.pop(0)
         out = ["", f"::: 문제 {self.source_line(note)}", *self.expand_lines(stem, note.path)]
@@ -515,7 +537,8 @@ class BookBuilder:
                 limit = int(value) if value.isdigit() else None
             else:
                 conds.append((key, op, value))
-        notes = [n for n in self.vault.notes() if n.path.resolve() not in self._stack and self.is_problem(n)
+        notes = [n for n in self.vault.notes() if n.path.resolve() not in self._stack
+                 and n.path.resolve() not in self._used and self.is_problem(n)
                  and all(_match(n.meta, k, op, v) for k, op, v in conds)]
 
         def sort_value(n: Note, key: str):
@@ -556,6 +579,22 @@ class BookBuilder:
         return "\n".join(lines), note.meta
 
 
+def _add_points(stem: list[str], mark: str) -> list[str]:
+    """배점을 발문(보기·그림·선택지 앞의 마지막 글 줄) 끝에 붙인다."""
+    last = None
+    for k, line in enumerate(stem):
+        t = line.strip()
+        if t.startswith(tuple(_CIRCLED)):
+            break
+        if t and not t.startswith((">", "!", "$$", ":::", "|", "#", "```")) and not t.endswith("$$"):
+            last = k
+    if last is None:
+        return stem
+    out = list(stem)
+    out[last] = out[last].rstrip() + " " + mark
+    return out
+
+
 def _match(meta: dict, key: str, op: str, value: str) -> bool:
     actual = meta.get(key)
     if actual is None:
@@ -591,3 +630,59 @@ def expand_note(path: str | Path, *, vault: str | Path | None = None, box_names:
     builder = BookBuilder(Vault(root), box_names=box_names, settings=settings)
     text, meta = builder.build(path)
     return text, meta, builder.warnings
+
+
+# ---------------------------------------------------------------------------
+# 점검: 볼트의 문제 노트·책 노트에서 교재에 걸릴 것 찾기
+# ---------------------------------------------------------------------------
+SUBJECT_LIST_NOTE = "단원 목록"
+
+
+def subject_list(vault: Vault) -> set[str] | None:
+    """'단원 목록' 노트의 목록 항목 (`- 기하/이차곡선/포물선`). 노트가 없으면 None."""
+    path = vault.find_note(SUBJECT_LIST_NOTE)
+    if path is None:
+        return None
+    items = set()
+    for line in vault.read(path).body.splitlines():
+        m = re.match(r"^\s*[-*+]\s+`?([^`]+?)`?\s*$", line)
+        if m:
+            items.add(m.group(1).strip())
+    return items
+
+
+def check_vault(root: str | Path, *, settings: ObsidianSettings | None = None,
+                box_names: set[str] | None = None) -> list[tuple[str, str]]:
+    """(노트 경로, 문제) 목록. 문제 노트는 정답·배점·단원·그림, 책 노트는 펼쳤을 때의 경고."""
+    vault = Vault(root)
+    builder = BookBuilder(vault, box_names=box_names, settings=settings)
+    subjects = subject_list(vault)
+    issues: list[tuple[str, str]] = []
+
+    def rel(path: Path) -> str:
+        return path.relative_to(vault.root).as_posix()
+
+    for note in vault.notes():
+        meta = note.meta
+        if "{{" in str(meta.get("title", "")) or "{{date" in note.body:  # 템플릿 노트
+            continue
+        builder.warnings = []
+        if builder.is_problem(note):
+            block = "\n".join(builder.problem_block(note))
+            if "[정답]" not in block:
+                issues.append((rel(note.path), "정답 없음 (속성 answer 또는 정답 콜아웃)"))
+            if meta.get("points") in (None, "") and not _POINTS.search(block):
+                issues.append((rel(note.path), "배점 없음 (속성 points)"))
+            subject = meta.get("subject")
+            if not subject:
+                issues.append((rel(note.path), "단원 없음 (속성 subject)"))
+            elif subjects is not None:
+                for sub in subject if isinstance(subject, list) else [subject]:
+                    if str(sub) not in subjects:
+                        issues.append((rel(note.path), f"단원 목록에 없는 단원: {sub}"))
+        elif str(meta.get("type", "")).lower() == "book" or meta.get("template"):
+            builder._used = set()
+            builder.build(note.path)
+        for w in dict.fromkeys(builder.warnings):
+            issues.append((rel(note.path), w.removesuffix(f" ({note.path.name})")))
+    return sorted(set(issues))

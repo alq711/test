@@ -23,6 +23,19 @@ def _all_langs(value: object) -> str:
     return " ".join(f'{name}="{value}"' for name in _LANG_ATTRS)
 
 
+def _clamp(value: object, low: int, high: int) -> int:
+    return max(low, min(high, round(float(value))))  # type: ignore[arg-type]
+
+
+_HFT_PREFIXES = ("한양", "신명 ", "#")
+_HFT_NAMES = {"명조", "고딕", "샘물", "필기", "시스템", "옛한글", "중고딕", "태고딕", "견명조", "견고딕"}
+
+
+def font_type(name: str) -> str:
+    """한글에 들어 있는 HFT 글꼴(한양신명조, 신명 중명조, #태고딕 …)은 HFT, 나머지는 TTF."""
+    return "HFT" if name.startswith(_HFT_PREFIXES) or name in _HFT_NAMES else "TTF"
+
+
 def normalize_align(value: str | None, default: str = "JUSTIFY") -> str:
     if not value:
         return default
@@ -69,6 +82,8 @@ class CharStyle:
     superscript: bool = False
     subscript: bool = False
     border_fill: int = 2  # 글자 테두리 (2 = 없음)
+    ratio: int | None = None  # 장평(%) — None 이면 글꼴별 설정(font_ratio)
+    spacing: int | None = None  # 자간(%) — None 이면 글꼴별 설정(font_spacing)
 
 
 @dataclass(frozen=True)
@@ -92,6 +107,8 @@ class BorderFill:
     top: Line = NO_LINE
     bottom: Line = NO_LINE
     fill: str | None = None  # 배경색 (#RRGGBB), None 이면 채우기 없음
+    slash: bool = False  # 칸 대각선 '/' (왼쪽 아래 → 오른쪽 위). 수능 시험지 쪽 번호 칸 '1/20'
+    diagonal: Line = Line("SOLID", "0.1 mm", "#000000")  # 대각선 모양
 
     @classmethod
     def box(cls, width: str = "0.12 mm", color: str = "#000000", fill: str | None = None) -> "BorderFill":
@@ -119,7 +136,7 @@ class ParaStyle:
     keep_with_next: bool = False
     keep_lines: bool = False
     break_latin_word: str = "KEEP_WORD"
-    break_non_latin_word: str = "BREAK_WORD"
+    break_non_latin_word: str = "KEEP_WORD"  # 한글: KEEP_WORD = 글자 단위로 나눔 (BREAK_WORD 는 어절 단위라 양쪽 정렬 때 빈칸이 벌어짐)
 
 
 @dataclass
@@ -142,6 +159,12 @@ class StyleRegistry:
 
     default_char: CharStyle = field(default_factory=CharStyle)
     default_para: ParaStyle = field(default_factory=ParaStyle)
+    font_ratio: dict = field(default_factory=dict)  # 글꼴 이름 → 장평(%), 예: {"함초롬바탕": 95}
+    font_spacing: dict = field(default_factory=dict)  # 글꼴 이름 → 자간(%), 예: {"함초롬바탕": -3}
+    # 글꼴 이름 → 언어별 글꼴. 예: {"신명 중명조": {"LATIN": "한양신명조", "SYMBOL": "한양신명조"}}
+    # (한글 문서는 글자 한 벌 안에서도 한글·영문·기호마다 다른 글꼴을 쓸 수 있다. 수능 시험지:
+    #  한글 = 신명 중명조, 숫자·영문·기호(? [ ] ①) = 한양신명조)
+    font_lang: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._fonts: list[str] = []
@@ -165,9 +188,16 @@ class StyleRegistry:
             self._fonts.append(name)
         return self._fonts.index(name)
 
+    def _lang_fonts(self, name: str) -> list[str]:
+        """_LANGS 순서대로 언어별 글꼴 이름."""
+        table = {str(k).upper(): v for k, v in (self.font_lang.get(name) or {}).items()}
+        return [table.get(lang, name) for lang in _LANGS]
+
     def char(self, style: CharStyle) -> int:
         if style not in self._char:
             self.font(style.font)
+            for name in self._lang_fonts(style.font):
+                self.font(name)
             self._char[style] = len(self._char)
         return self._char[style]
 
@@ -210,7 +240,7 @@ class StyleRegistry:
     # --- XML 생성 -----------------------------------------------------------
     def _fontfaces_xml(self) -> str:
         fonts = "".join(
-            f'<hh:font id="{i}" face={quoteattr(name)} type="TTF" isEmbedded="0">'
+            f'<hh:font id="{i}" face={quoteattr(name)} type="{font_type(name)}" isEmbedded="0">'
             '<hh:typeInfo familyType="FCAT_GOTHIC" weight="6" proportion="4" contrast="0" '
             'strokeVariation="1" armStyle="1" letterform="1" midline="1" xHeight="1"/>'
             "</hh:font>"
@@ -226,7 +256,7 @@ class StyleRegistry:
         for bf, bf_id in sorted(self._border.items(), key=lambda kv: kv[1]):
             parts = [
                 f'<hh:borderFill id="{bf_id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0">',
-                '<hh:slash type="NONE" Crooked="0" isCounter="0"/>',
+                f'<hh:slash type="{"CENTER" if bf.slash else "NONE"}" Crooked="0" isCounter="0"/>',
                 '<hh:backSlash type="NONE" Crooked="0" isCounter="0"/>',
             ]
             for tag, line in (
@@ -236,7 +266,8 @@ class StyleRegistry:
                 ("bottomBorder", bf.bottom),
             ):
                 parts.append(f'<hh:{tag} type="{line.type}" width="{line.width}" color="{line.color}"/>')
-            parts.append('<hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/>')
+            d = bf.diagonal
+            parts.append(f'<hh:diagonal type="{d.type}" width="{d.width}" color="{d.color}"/>')
             if bf.fill is not None:
                 parts.append(
                     f'<hc:fillBrush><hc:winBrush faceColor="{bf.fill}" hatchColor="#999999" alpha="0"/></hc:fillBrush>'
@@ -248,14 +279,20 @@ class StyleRegistry:
     def _char_props_xml(self) -> str:
         items = []
         for cs, cs_id in sorted(self._char.items(), key=lambda kv: kv[1]):
-            font_id = self.font(cs.font)
+            names = self._lang_fonts(cs.font)
+            refs = " ".join(f'{a}="{self.font(n)}"' for a, n in zip(_LANG_ATTRS, names))
+
+            def per_lang(table: dict, default: object, low: int, high: int) -> str:
+                return " ".join(f'{a}="{_clamp(table.get(n, table.get(cs.font, default)), low, high)}"'
+                                for a, n in zip(_LANG_ATTRS, names))
+
             height = round(cs.size * 100)
             parts = [
                 f'<hh:charPr id="{cs_id}" height="{height}" textColor="{cs.color}" shadeColor="{cs.shade}" '
                 f'useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="{cs.border_fill}">',
-                f"<hh:fontRef {_all_langs(font_id)}/>",
-                f"<hh:ratio {_all_langs(100)}/>",
-                f"<hh:spacing {_all_langs(0)}/>",
+                f"<hh:fontRef {refs}/>",
+                f"<hh:ratio {_all_langs(_clamp(cs.ratio, 50, 200)) if cs.ratio is not None else per_lang(self.font_ratio, 100, 50, 200)}/>",
+                f"<hh:spacing {_all_langs(_clamp(cs.spacing, -50, 50)) if cs.spacing is not None else per_lang(self.font_spacing, 0, -50, 50)}/>",
                 f"<hh:relSz {_all_langs(100)}/>",
                 f"<hh:offset {_all_langs(0)}/>",
             ]
@@ -280,10 +317,13 @@ class StyleRegistry:
     @staticmethod
     def _margin_xml(ps: ParaStyle, scale: int) -> str:
         unit = ' unit="HWPUNIT"'
+        # ParaStyle 은 CSS 처럼 left = 둘째 줄부터의 왼쪽 여백, indent < 0 = 첫 줄을 그만큼 왼쪽으로.
+        # 한글의 '내어쓰기'는 반대로 첫 줄을 왼쪽 여백에 두고 둘째 줄부터 밀어 넣으므로 여기서 바꿔 적는다.
+        left = ps.left + min(ps.indent, 0)
         return (
             "<hh:margin>"
             f'<hc:intent value="{ps.indent * scale}"{unit}/>'
-            f'<hc:left value="{ps.left * scale}"{unit}/>'
+            f'<hc:left value="{left * scale}"{unit}/>'
             f'<hc:right value="{ps.right * scale}"{unit}/>'
             f'<hc:prev value="{ps.space_before * scale}"{unit}/>'
             f'<hc:next value="{ps.space_after * scale}"{unit}/>'

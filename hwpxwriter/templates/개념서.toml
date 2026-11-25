@@ -1,0 +1,218 @@
+# ============================================================
+#  '개념서' 양식 ('문제집'과 같은 모양·글꼴, 개념 설명 중심)
+#    - 표지·머리말·단원 제목·글꼴은 문제집과 같음
+#    - 개념: 1단. 정의·정리·공식·예제·증명·참고·주의 상자
+#    - 확인 문제: 새 쪽에서 2단, 머리말에 '단원 · 확인 문제', 단원마다 번호 01부터
+#    - 정답과 해설: 단원별 정답표 + 해설(2단)
+#
+#  사용: md2hwpx 개념서.md -t 개념서
+#  고쳐 쓰기: md2hwpx --init-template 내양식.toml -t 개념서
+#  길이: mm, 글자 크기·간격: pt, 색: "#RRGGBB"
+# ============================================================
+
+title = ""
+
+[page]
+paper = "A4"
+margin = [15, 16, 15, 16]     # 위, 오른쪽, 아래, 왼쪽
+margin_header = 10
+margin_footer = 10
+columns = 1                   # 개념 부분은 1단 (문제가 나오면 [problem] columns 로 자동 전환)
+column_gap = 8
+column_line = true
+
+[font]
+body = "Pretendard"            # 핵심 개념·제목·머리말 (고딕). 없는 컴퓨터에서는 다른 글꼴로 바뀌어 보임
+heading = "Pretendard"
+code = "굴림체"
+size = 9.3
+line_spacing = 175
+paragraph_spacing = 3
+color = "#222222"
+ratio = { "신명 중명조" = 95 }       # 장평(%): 문제·해설 명조를 수능 시험지처럼 조금 좁게
+spacing = { "신명 중명조" = -2 }     # 자간(%)
+
+[heading]
+color = "#222222"
+
+[heading.1]                   # # 01 포물선
+size = 20
+color = "#222222"
+number_color = "#1F3864"
+number_size = 34
+rule_color = "#1F3864"
+rule_width = "0.7 mm"
+rule_gap = 4                  # 글자와 선 사이 (pt)
+line_spacing = 100            # 큰 번호 때문에 줄이 높아지지 않게
+space_before = 0
+space_after = 16              # 선 아래 간격 (pt)
+
+[heading.2]                   # ## 1. 포물선의 방정식   /   ## 확인 문제
+size = 11.5
+color = "#1F3864"
+sub_color = "#333333"
+rule_color = "#BFBFBF"
+rule_width = "0.12 mm"
+rule_gap = 5
+line_spacing = 130
+space_before = 12
+space_after = 10
+
+[heading.3]                   # ### 포물선의 정의
+size = 11
+color = "#222222"
+number_color = "#1F3864"
+number_font = "신명 중명조"
+space_before = 9
+space_after = 5
+
+[equation]
+font = "HYhwpEQ"               # 수식 글꼴: 수능 시험지와 같은 옛 한글 수식 모양 (새 모양: "HancomEQN")
+size = 0
+display_align = "center"
+display_background = "#F2F2F2"   # $$수식$$ 줄 회색 배경 (문제·해설 안에서는 배경 없음)
+
+[list]
+bullet = "▪"
+bullet_color = "#1F3864"
+
+[table]
+style = "booktabs"            # 위·아래 굵은 선, 제목 줄 아래 가는 선
+rule_color = "#000000"
+row_line_color = "#D9D9D9"
+
+[header]
+left = "{title}"               # 책 이름: 표지의 "제목 | 부제" (또는 문서 제목). 직접 글을 써도 됨
+right = "{chapter}"           # 단원 제목 (본문에서 \머리말 공통 9번 처럼 바꿀 수 있음)
+align = "left"
+rule = "#999999"
+right_color = "#1F3864"
+right_bold = true
+
+[footer]
+text = "{page}"
+align = "center"
+
+[chapter]
+new_page = true
+hide_header = "numbered"      # '# 09 …' 처럼 번호 있는 단원 첫 쪽은 머리말·꼬리말 감춤
+
+[cover]
+band_color = "#1F3864"
+band_height = 6
+top_space = 75
+top_size = 11
+top_color = "#595959"
+title_size = 44
+title_color = "#222222"
+subtitle_size = 19
+subtitle_sub_size = 12
+subtitle_color = "#1F3864"
+desc_size = 8.5
+desc_color = "#595959"
+author_y = 272                # 저자 줄 자리 (종이 위에서 mm). 설명이 길어도 다음 쪽으로 밀리지 않음
+
+[problem]
+layout = "header"             # 01 ………… 2027학년도 9월 모의평가 9번
+number_format = "{n:02d}"
+number_color = "#222222"
+number_size = 13
+source_size = 7
+source_color = "#6B6B6B"
+reset = "chapter"             # 단원마다 01부터
+space_after = 55              # 문제 뒤 풀이 공간 (mm): 한 단에 1~2문항
+font = "신명 중명조"            # 문제 본문은 명조
+size = 9.6
+line_spacing = 182
+display_align = "left"        # 문제 안 수식 줄은 왼쪽, 살짝 들여씀
+display_indent = 4
+columns = 2                   # 문제가 나오면 2단으로
+new_page = true               # '## 확인 문제'처럼 문제 구역은 새 쪽에서 (개념 쪽과 문제 쪽을 나눔)
+section_header = "{chapter}  ·  {section}"   # 문제 쪽 머리말 오른쪽: 단원 · 구역 이름
+section_titles = ["확인 문제", "연습 문제", "기출 문제", "최근 기출", "실전 문제", "유형 문제"]
+column_line = true
+
+[answers]
+title = "정답과 해설"
+new_page = true
+columns = 2
+column_line = true
+quick_table = true
+quick_style = "grid"          # 위 번호 / 아래 정답, 10칸
+quick_columns = 10
+entry_layout = "line"         # 01 출처 …………… 정답 ①  + 가는 선
+rule_color = "#BFBFBF"
+answer_label = "정답"
+show_chapters = true          # 단원별로 묶어서
+font = "신명 중명조"
+size = 8.8
+line_spacing = 176
+
+# ------------------------------------------------------------
+#  상자  ( ::: 이름 ... ::: )
+# ------------------------------------------------------------
+[box."보기"]                  # 〈보 기〉 상자
+kind = "titled"
+label = "〈보 기〉"
+border_color = "#000000"
+border_width = "0.12 mm"
+title_color = "#000000"
+padding = 2.5
+
+[box."주의"]                  # [주의] 테두리 꼬리표
+kind = "tag"
+border_color = "#000000"
+label_color = "#000000"
+title_size = 7.5
+
+[box."참고"]
+kind = "tag"
+border_color = "#1F3864"
+label_color = "#1F3864"
+title_size = 7.5
+
+[box."정의"]
+kind = "bar"
+numbered = false
+border_color = "#1F3864"
+title_background = "#1F3864"
+title_color = "#FFFFFF"
+background = "#F5F7FB"
+
+[box."예제"]
+kind = "inline"
+border_color = "#7F7F7F"
+label_color = "#1F3864"
+border_width = "0.12 mm"
+solution_label = "풀이"
+solution_color = "#1F3864"
+
+[box."조건"]                  # (가) (나) 조건 상자
+kind = "plain"
+border_color = "#000000"
+border_width = "0.12 mm"
+padding = 2.5
+
+[box."정리"]                  # 남색 테두리 + 이름표
+kind = "inline"
+border_color = "#1F3864"
+label_color = "#1F3864"
+border_width = "0.12 mm"
+padding = 3
+
+[box."공식"]                  # 연한 회색 바탕 (테두리 없음)
+kind = "plain"
+border_color = "#F2F2F2"
+background = "#F2F2F2"
+padding = 3
+
+[box."증명"]                  # 왼쪽 회색 세로줄
+kind = "line"
+border_color = "#BFBFBF"
+padding = 2.5
+
+[box."개념확인"]              # 짧은 확인 질문 (남색 꼬리표)
+kind = "tag"
+border_color = "#1F3864"
+label_color = "#1F3864"
+title_size = 7.5

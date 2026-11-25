@@ -1,0 +1,130 @@
+# ============================================================
+#  '모의고사' 양식 — 대학수학능력시험 수학 영역 문제지와 같은 모양
+#
+#  평가원 2028학년도 수능 수학 예시문항(A3, 선택과목 없이 30문항 12쪽)을 실측한 값입니다.
+#    - 용지 A3, 2단 + 가운데 세로선(0.4 mm)
+#    - 첫 쪽: '2028학년도 대학수학능력시험 문제지' / (제 2 교시) 수학 영역 / 굵은 선
+#    - 둘째 쪽부터 머리말: 바깥쪽 큰 쪽 번호, 가운데 '수학 영역', 아래 굵은 선
+#    - 꼬리말: 가운데 '쪽/전체' 대각선 칸
+#    - 문제: 신명 중명조 11.5pt (숫자·영문·기호는 한양신명조), 장평 95%, 자간 -3%, 줄 간격 165%
+#            번호 '1.' 한양견명조 13.8pt, 수식 HYhwpEQ 11pt  (글꼴은 2027 문제지 실측 그대로)
+#    - 문제 자리는 번호마다 고정 (원본과 같음, 아래 [exam] common_slots): 1~4번 1쪽,
+#      22번 앞 '단답형', 30번 단 아래 '※ 확인 사항' 상자
+#    - 2027학년도까지 모양(공통 22 + 선택과목)은 [exam] 아래 설명대로 바꾸면 됨
+#
+#  글꼴은 모두 한글(한컴오피스)에 들어 있는 글꼴입니다 (따로 설치할 필요 없음).
+#  사용: md2hwpx 모의고사.md -t 모의고사
+#  고쳐 쓰기: md2hwpx --init-template 내양식.toml -t 모의고사
+#  길이: mm, 글자 크기: pt, 장평·자간: %
+# ============================================================
+
+title = ""
+
+[page]
+paper = "A3"                  # 수능 문제지 원본 크기. 인쇄할 때 '모아 찍기/용지에 맞춤'으로 B4·A4 에 줄여 찍으면 됨
+margin = [36, 30.9, 25, 31]   # 위, 오른쪽, 아래, 왼쪽 (위 = 머리말이 시작하는 곳)
+margin_header = 16            # 머리말 높이: 종이 위 52 mm 에 굵은 선
+margin_footer = 18.5          # 본문 아래(376.5 mm) ~ 꼬리말
+columns = 2
+column_gap = 10.9
+column_line = true
+
+[font]
+body = "신명 중명조"
+heading = "한양견고딕"
+code = "굴림체"
+size = 11.5
+line_spacing = 165
+paragraph_spacing = 0
+color = "#000000"
+latin = { "신명 중명조" = "한양신명조" }    # 문제 글의 숫자·영문·기호(? [ ] ① ,)는 한양신명조
+ratio = { "신명 중명조" = 95, "한양신명조" = 95, "한양견명조" = 95 }
+spacing = { "신명 중명조" = -3, "한양신명조" = -3 }
+
+[equation]
+font = "HYhwpEQ"              # 수능 시험지 수식 글꼴 (옛 한글 수식 모양)
+size = 11
+display_align = "left"
+
+[choices]
+space_before = 3.5            # 문제 글 ~ 보기 ①~⑤ (mm)
+pad_left = 0
+
+[problem]
+layout = "inline"             # '1. 문제 글…' 한 줄로
+number_format = "{n}."
+number_font = "한양견명조"
+number_size = 13.8
+number_bold = false
+number_color = "#000000"
+indent = 4                    # 둘째 줄부터 들여쓰기 (mm): 번호 아래가 아니라 글 시작 쪽으로
+reset = "never"
+space_after = 0
+font = "신명 중명조"
+size = 11.5
+line_spacing = 165
+display_align = "left"        # 가운데 수식 줄은 왼쪽에서 조금 들여서
+display_indent = 8
+title_bold = false
+
+[answers]
+title = "정답과 해설"
+new_page = true
+columns = 2
+column_line = true
+quick_table = true
+quick_style = "grid"
+quick_columns = 10
+entry_layout = "inline"
+show_chapters = false
+font = "신명 중명조"
+size = 10
+line_spacing = 160
+
+[box."보기"]                  # 〈보 기〉 상자 (윗선 가운데 이름표)
+kind = "titled"
+label = "〈보 기〉"
+border_color = "#000000"
+border_width = "0.12 mm"
+title_color = "#000000"
+padding = 3
+
+[box."조건"]                  # (가) (나) 조건 상자
+kind = "plain"
+border_color = "#000000"
+border_width = "0.12 mm"
+padding = 3
+
+# ------------------------------------------------------------
+#  시험지 모양 ([exam]). 빈 항목은 기본값(평가원 원본 실측)
+#  문서 맨 앞 '::: 시험지' 상자에서 위·교시·영역·유형·안내를 바꿀 수 있음
+# ------------------------------------------------------------
+[exam]
+top_text = "2028학년도 대학수학능력시험 문제지"
+period = "제 2 교시"
+subject = "수학 영역"
+form = ""                     # 2028 예시문항엔 홀수형 상자가 없음. "홀수형" 이면 첫 쪽·머리말에 상자
+notice = ""                   # 꼬리말 오른쪽 아래 작은 글 (원본: 이 문제지에 관한 저작권은 …에 있습니다.)
+label_1 = "5 지 선 다 형"      # 상자 글 (2028 예시문항은 글자 사이를 띄움)
+label_2 = "단 답 형"
+title_size = 42               # 첫 쪽 '수학 영역'
+header_title_size = 30        # 둘째 쪽부터 머리말 '수학 영역'
+period_size = 21              # '제 2 교시'
+column_line_width = "0.4 mm"  # 가운데 세로선
+check_box = true              # 끝 단 아래 '※ 확인 사항' 상자
+slots = 2                     # 한 단을 몇 칸으로 나눌지
+slot_top = 4.6                # 굵은 선 ~ 문제 번호 (mm)
+layout = "fixed"              # 번호별 고정 자리. "free" = '::: 문제 크게' · \5지선다형 · \단답형 으로 직접
+# 번호별 칸 수 (1 = 반 단, 2 = 한 단 통째). 2028학년도 수능 예시문항 (선택과목 없이 30문항, 12쪽) 실측:
+#   1쪽 1·2 | 3·4   2쪽 5·6 | 7   3쪽 8·9 | 10   4쪽 11 | 12   5쪽 13 | 14   6쪽 15 | 16
+#   7쪽 17 | 18   8쪽 19 | 20   9쪽 21 | 단답형 22·23   10쪽 24·25 | 26   11쪽 27 | 28
+#   12쪽 29 | 30 + 확인 사항
+common_slots = [1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 2]
+common_short_from = 22        # 단답형 상자가 붙는 번호
+# 2027학년도까지 (공통 22 + 선택과목 8) 모양으로 쓰려면:
+#   form = "홀수형", label_1 = "5지선다형", label_2 = "단답형", title_size = 40, header_title_size = 28,
+#   period_size = 22, column_line_width = "0.3 mm", common_short_from = 16,
+#   common_slots = [1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 2, 2, 2]
+#   그리고 문서에서 \선택과목 미적분 (새 쪽, 23번부터, 한 단에 한 문제, 29번 앞 단답형)
+elective_slots = [2, 2, 2, 2, 2, 2, 2, 2]
+elective_short_from = 7

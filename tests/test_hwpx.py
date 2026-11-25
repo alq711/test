@@ -138,13 +138,21 @@ def validate(data: bytes) -> dict[str, ET.Element]:
     for tbl in sec.iter(HP + "tbl"):
         rows = tbl.findall(HP + "tr")
         assert int(tbl.get("rowCnt")) == len(rows)
+        n_cols = int(tbl.get("colCnt"))
+        covered: set[tuple[int, int]] = set()  # 병합 칸까지 포함해 모든 칸이 정확히 한 번 덮이는지
         for r, tr in enumerate(rows):
-            cells = tr.findall(HP + "tc")
-            assert len(cells) == int(tbl.get("colCnt"))
-            for c, tc in enumerate(cells):
+            for tc in tr.findall(HP + "tc"):
                 addr = tc.find(HP + "cellAddr")
-                assert (addr.get("rowAddr"), addr.get("colAddr")) == (str(r), str(c))
+                assert addr.get("rowAddr") == str(r)
+                c = int(addr.get("colAddr"))
+                span = tc.find(HP + "cellSpan")
+                cs, rs = int(span.get("colSpan")), int(span.get("rowSpan"))
+                for rr in range(r, r + rs):
+                    for cc in range(c, c + cs):
+                        assert (rr, cc) not in covered and cc < n_cols and rr < len(rows)
+                        covered.add((rr, cc))
                 assert tc.find(HP + "subList").find(HP + "p") is not None
+        assert len(covered) == n_cols * len(rows)
     return trees
 
 

@@ -248,7 +248,7 @@ SUNEUNG = Path(__file__).resolve().parent.parent / "examples" / "수능파이널
 
 
 def test_suneung_template_loads_without_warnings():
-    t = load_template("수능파이널")
+    t = load_template("문제집")
     assert not t.warnings
     assert t.problem.layout == "header" and t.problem.columns == 2
     assert t.boxes["보기"].style.kind == "titled" and t.boxes["주의"].style.kind == "tag"
@@ -258,7 +258,7 @@ def test_suneung_template_loads_without_warnings():
 def test_suneung_example_structure(tmp_path: Path):
     from test_hwpx import HC, HH
 
-    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), tmp_path / "s.hwpx", template="수능파이널",
+    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), tmp_path / "s.hwpx", template="문제집",
                          base_dir=SUNEUNG.parent)
     assert doc.warnings == []
     trees = validate((tmp_path / "s.hwpx").read_bytes())
@@ -325,7 +325,7 @@ def test_header_split_and_change_mid_document():
 
 def test_cli_init_from_builtin(tmp_path: Path):
     out = tmp_path / "내양식.toml"
-    assert cli_main(["--init-template", str(out), "-t", "수능파이널"]) == 0
+    assert cli_main(["--init-template", str(out), "-t", "문제집"]) == 0
     assert 'layout = "header"' in out.read_text(encoding="utf-8")
     assert not load_template(out).warnings
 
@@ -338,7 +338,7 @@ def test_ruled_and_shaded_paragraphs_do_not_bleed():
     """
     from test_hwpx import HH
 
-    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), template="수능파이널", base_dir=SUNEUNG.parent)
+    doc = build_textbook(SUNEUNG.read_text(encoding="utf-8"), template="문제집", base_dir=SUNEUNG.parent)
     trees = validate(doc.to_bytes())
     head, sec = trees["Contents/header.xml"], trees["Contents/section0.xml"]
     plain_bf = {bf.get("id") for bf in head.iter(HH + "borderFill")
@@ -376,3 +376,109 @@ def test_span_font_family_size_and_style():
     head = validate(doc.to_bytes())["Contents/header.xml"]
     from test_hwpx import HH
     assert "나눔스퀘어" in {f.get("face") for f in head.iter(HH + "font")}
+
+
+# ---------------------------------------------------------------------------
+# 시중 교재 모양 맞춤: 장평·자간, 문제 묶음, 내어쓰기, 〈보 기〉
+# ---------------------------------------------------------------------------
+
+
+def _header_and_section(data: bytes):
+    trees = validate(data)
+    return trees["Contents/header.xml"], trees["Contents/section0.xml"]
+
+
+def test_font_ratio_and_spacing_from_template(tmp_path):
+    t = template_from_dict({"font": {"body": "함초롬돋움", "ratio": {"함초롬바탕": 95}, "spacing": -3}})
+    assert t.warnings == []
+    assert t.theme.font_ratio == {"함초롬바탕": 95}
+    assert t.theme.font_spacing == {"함초롬돋움": -3}
+    out = tmp_path / "r.hwpx"
+    build_textbook("::: 문제\n본문\n:::\n", out, template="문제집")
+    head, _ = _header_and_section(out.read_bytes())
+    HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
+    fonts = [f.get("face") for f in head.find(f".//{HH}fontface").findall(HH + "font")]
+    batang = str(fonts.index("신명 중명조"))
+    ratios = {cp.find(HH + "fontRef").get("hangul"): cp.find(HH + "ratio").get("hangul") for cp in head.iter(HH + "charPr")}
+    assert ratios[batang] == "95"
+
+
+def test_problem_keep_together_releases_last_paragraph():
+    doc = HwpxDocument()
+    with doc.keep_together():
+        doc.add_paragraph("하나")
+        doc.add_paragraph("둘")
+    doc.add_paragraph("다음 문제")
+    head, sec = _header_and_section(doc.to_bytes())
+    HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
+    keep = {pp.get("id"): pp.find(HH + "breakSetting").get("keepWithNext") for pp in head.iter(HH + "paraPr")}
+    paras = {"".join(t.text or "" for t in p.iter(HP + "t")): p.get("paraPrIDRef") for p in sec.iter(HP + "p")}
+    assert keep[paras["하나"]] == "1"
+    assert keep[paras["둘"]] == "0"  # 묶음 끝은 다음 문단과 묶지 않아야 한글이 묶음을 지킨다
+
+
+def test_hanging_indent_uses_hangul_semantics():
+    doc = HwpxDocument()
+    doc.add_list_item("항목")
+    head, sec = _header_and_section(doc.to_bytes())
+    HH, HC = "{http://www.hancom.co.kr/hwpml/2011/head}", "{http://www.hancom.co.kr/hwpml/2011/core}"
+    pid = next(p.get("paraPrIDRef") for p in sec.iter(HP + "p") if "항목" in "".join(t.text or "" for t in p.iter(HP + "t")))
+    pp = next(pp for pp in head.iter(HH + "paraPr") if pp.get("id") == pid)
+    case = pp.find(".//" + HH + "margin")
+    assert int(case.find(HC + "intent").get("value")) < 0
+    assert case.find(HC + "left").get("value") == "0"  # 글머리표는 본문 왼쪽 끝, 둘째 줄부터 들여씀
+
+
+def test_bogi_label_sits_on_box_border():
+    doc = HwpxDocument()
+    from hwpxwriter.document import BoxStyle
+    with doc.box(label="〈보 기〉", style=BoxStyle(kind="titled")):
+        doc.add_paragraph("ㄱ. 내용")
+    _, sec = _header_and_section(doc.to_bytes())
+    tbl = next(sec.iter(HP + "tbl"))
+    assert tbl.get("colCnt") == "3" and tbl.get("rowCnt") == "3"
+    spans = [(s.get("colSpan"), s.get("rowSpan")) for s in tbl.iter(HP + "cellSpan")]
+    assert ("1", "2") in spans and ("3", "1") in spans
+
+
+def test_cover_author_fixed_position(tmp_path):
+    out = tmp_path / "c.hwpx"
+    build_textbook("::: 표지\n제목: 책\n설명:\n" + "긴 설명\n" * 40 + "저자: 이름\n:::\n", out, template="문제집")
+    _, sec = _header_and_section(out.read_bytes())
+    pos = [t.find(HP + "pos") for t in sec.iter(HP + "tbl")]
+    assert any(p.get("vertRelTo") == "PAPER" and int(p.get("vertOffset")) > 0 for p in pos)
+
+
+def test_workbook_template_old_name_and_title_header(tmp_path):
+    assert load_template("수능파이널").header.left == load_template("문제집").header.left == "{title}"
+    out = tmp_path / "t.hwpx"
+    build_textbook("::: 표지\n제목: 내 문제집\n부제: 미적분 | 4점\n:::\n\n# 01 극한\n\n본문\n", out, template="문제집")
+    _, sec = _header_and_section(out.read_bytes())
+    texts = ["".join(t.text or "" for t in h.iter(HP + "t")) for h in sec.iter(HP + "header")]
+    assert any("내 문제집 | 미적분" in t for t in texts)
+    assert not any("{title}" in t for t in texts)
+
+
+def test_concept_book_template_builds_example(tmp_path):
+    t = load_template("개념서")
+    assert t.warnings == []
+    assert {"정의", "정리", "공식", "예제", "증명", "주의", "보기", "조건"} <= set(t.boxes)
+    example = Path(__file__).resolve().parent.parent / "examples" / "개념서_예시.md"
+    doc = build_textbook(example.read_text(encoding="utf-8"), tmp_path / "c.hwpx", template="개념서")
+    assert doc.warnings == []
+    validate((tmp_path / "c.hwpx").read_bytes())
+
+
+def test_problem_section_starts_new_page(tmp_path):
+    md = ("# 01 포물선\n\n## 1. 정의\n\n개념 설명\n\n## 확인 문제\n\n::: 문제\n문제 하나\n[정답] 1\n:::\n\n"
+          "## 2. 접선\n\n다음 개념\n")
+    out = tmp_path / "p.hwpx"
+    build_textbook(md, out, template="개념서")
+    _, sec = _header_and_section(out.read_bytes())
+    breaks = [("".join(t.text or "" for t in p.iter(HP + "t")), p.get("pageBreak")) for p in sec.findall(HP + "p")]
+    starts = {text for text, pb in breaks if pb == "1"}
+    assert any("확인 문제" in t for t in starts)       # 문제 구역 앞에서 새 쪽
+    assert any("접선" in t for t in starts)            # 개념으로 돌아갈 때도 새 쪽
+    assert not any("정의" in t and "1." in t for t in starts)  # 단원 첫 개념은 단원 제목과 같은 쪽
+    headers = ["".join(t.text or "" for t in h.iter(HP + "t")) for h in sec.iter(HP + "header")]
+    assert any("포물선  ·  확인 문제" in h for h in headers)
