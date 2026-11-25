@@ -200,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
                 doc = build_from_obsidian(src_path, vault=args.vault, template=template or args.template,
                                           title=args.title)
             elif template is not None and not args.text:
-                from .textbook import Textbook
+                from .textbook import make_renderer
 
                 tpl = template
                 if args.header or args.footer or args.page_number:
@@ -214,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                         footer=HeaderDef(args.footer) if args.footer
                         else HeaderDef("- {page} -") if args.page_number else tpl.footer,
                     )
-                doc = Textbook(tpl).build(source, base_dir=base_dir, title=args.title or src_path.stem)
+                doc = make_renderer(tpl).build(source, base_dir=base_dir, title=args.title or src_path.stem)
             elif args.text or src_path.suffix.lower() == ".txt":
                 doc = text_to_hwpx(source, **common)
             else:

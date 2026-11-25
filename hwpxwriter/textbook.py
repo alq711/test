@@ -49,7 +49,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 TEMPLATE_DIR = Path(__file__).with_name("templates")
 BUILTIN_TEMPLATE = TEMPLATE_DIR / "수학교재.toml"
-_BUILTIN_ALIASES = {"기본": "수학교재", "default": "수학교재", "math": "수학교재", "suneung": "문제집", "수능파이널": "문제집", "workbook": "문제집"}
+_BUILTIN_ALIASES = {"기본": "수학교재", "default": "수학교재", "math": "수학교재", "suneung": "문제집", "수능파이널": "문제집", "workbook": "문제집", "수능": "모의고사", "시험지": "모의고사", "exam": "모의고사"}
 
 _PROBLEM_NAMES = {"문제", "problem", "연습문제", "연습", "exercise"}
 _COVER_NAMES = {"표지", "cover"}
@@ -174,6 +174,7 @@ class Template:
     cover: CoverStyle = field(default_factory=CoverStyle)
     boxes: dict[str, BoxDef] = field(default_factory=dict)
     obsidian: dict = field(default_factory=dict)  # [obsidian] 설정 (obsidian.ObsidianSettings)
+    exam: dict | None = None  # [exam] 시험지 양식 (exam.ExamStyle). 있으면 수능 시험지처럼 조판
     warnings: list[str] = field(default_factory=list)
 
 
@@ -249,6 +250,19 @@ def template_from_dict(data: dict) -> Template:
     t.page = _apply(t.page, page, "page", w, convert={"paper": lambda v: tuple(v) if isinstance(v, list) else v})
 
     font = dict(data.pop("font", {}))
+    lang_map: dict[str, dict[str, str]] = {}
+    for key, langs in (("latin", ("LATIN", "SYMBOL", "OTHER")), ("hanja", ("HANJA",)), ("symbol", ("SYMBOL",))):
+        # [font] latin = { "신명 중명조" = "한양신명조" } → 그 글꼴의 영문·숫자·기호만 다른 글꼴로
+        spec = font.pop(key, None)
+        if spec is None:
+            continue
+        if not isinstance(spec, dict):
+            spec = {font.get("body", Theme.body_font): spec}
+        for base, other in spec.items():
+            for lang in langs:
+                lang_map.setdefault(base, {})[lang] = other
+    if lang_map:
+        font["font_lang"] = lang_map
     for key in ("ratio", "spacing"):  # 장평·자간: 숫자 하나면 본문 글꼴, 표면 글꼴별
         if key in font and not isinstance(font[key], dict):
             font[key] = {font.get("body", Theme.body_font): font[key]}
@@ -297,6 +311,20 @@ def template_from_dict(data: dict) -> Template:
                        convert={"names": lambda v: tuple(v), "section_titles": lambda v: tuple(v)})
     t.answers = _apply(t.answers, dict(data.pop("answers", {})), "answers", w)
     t.cover = _apply(t.cover, dict(data.pop("cover", {})), "cover", w)
+    choices = dict(data.pop("choices", {}))
+    theme_ch = {}
+    for key, name in (("space_before", "choice_space_before"), ("pad_left", "choice_pad_left")):
+        if key in choices:
+            theme_ch[name] = float(choices.pop(key))
+    for k in choices:
+        w.append(f"양식 [choices] 의 '{k}' 는 알 수 없는 항목이라 무시했습니다")
+    if theme_ch:
+        t.theme = replace(t.theme, **theme_ch)
+    if "exam" in data:
+        from .exam import ExamStyle
+
+        t.exam = dict(data.pop("exam"))
+        ExamStyle.from_dict(t.exam, w)  # 오타 경고만
     t.obsidian = dict(data.pop("obsidian", {}))
     if t.obsidian:
         from .obsidian import ObsidianSettings
@@ -691,6 +719,15 @@ class Textbook(MarkdownHandler):
         doc.add_spacer(2)
 
 
+def make_renderer(template: Template) -> Textbook:
+    """양식에 맞는 조판기: [exam] 이 있으면 시험지(ExamPaper), 아니면 교재(Textbook)."""
+    if template.exam is not None:
+        from .exam import ExamPaper
+
+        return ExamPaper(template)
+    return Textbook(template)
+
+
 def render_inline(doc: HwpxDocument, text: str) -> list[Run]:
     return parse_inline(text, Run(""), doc.theme.link_color)
 
@@ -705,7 +742,7 @@ def build_textbook(
 ) -> HwpxDocument:
     """확장 Markdown 으로 교재를 만들고, output 이 있으면 저장한다."""
     tpl = template if isinstance(template, Template) else load_template(template)
-    doc = Textbook(tpl).build(markdown, base_dir=base_dir, title=title)
+    doc = make_renderer(tpl).build(markdown, base_dir=base_dir, title=title)
     if output is not None:
         doc.save(output)
     return doc
@@ -750,7 +787,7 @@ def build_from_obsidian(
         template = load_template(name)
     settings = ObsidianSettings.from_dict(template.obsidian)
     text, meta, warnings = expand_note(note, vault=root, box_names=set(template.boxes), settings=settings)
-    doc = Textbook(template).build(text, base_dir=note.parent, title=title or str(meta.get("title") or note.stem))
+    doc = make_renderer(template).build(text, base_dir=note.parent, title=title or str(meta.get("title") or note.stem))
     doc.warnings[:0] = warnings
     if output is not None:
         doc.save(output)
